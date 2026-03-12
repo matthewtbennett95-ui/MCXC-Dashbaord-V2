@@ -759,108 +759,105 @@ def password_reset_page():
 # 7. HOME PAGE ROUTER
 # ==========================================
 
-def _render_sidebar_opener_button():
+def _render_settings_overlay():
     """
-    Renders a branded gradient bar with a Settings button at the top of every
-    logged-in page. Clicking it programmatically opens the Streamlit sidebar
-    (the native left panel holding the theme picker and logout button).
+    A fully custom settings panel that replaces st.sidebar entirely.
 
-    IMPORTANT — why st.markdown instead of components.html:
-    components.html() renders inside a sandboxed <iframe>. Browsers block that
-    iframe from accessing window.parent.document, so any JS click on the
-    sidebar toggle is silently swallowed. st.markdown(unsafe_allow_html=True)
-    injects HTML+JS directly into the main page document, giving the script
-    unrestricted access to Streamlit's own DOM elements.
+    WHY we stopped using st.sidebar:
+      Streamlit's native sidebar is collapsed and hidden off-screen on mobile.
+      There is no reliable, version-stable way to programmatically open it via
+      JavaScript — Streamlit Cloud updates break selectors regularly, and
+      st.markdown scripts can't guarantee timing vs DOM readiness.
 
-    The JS tries three selector strategies for cross-version compatibility:
-      1. [data-testid="stSidebarCollapsedControl"]  — Streamlit >= 1.28
-      2. [data-testid="collapsedControl"]            — older versions
-      3. button[aria-expanded="false"]               — generic last resort
+    HOW this works instead:
+      - A branded gradient bar sits pinned at the top of every logged-in page.
+      - It contains a single Streamlit button: "⚙️ Settings" / "✖ Close".
+      - Clicking it flips session_state["settings_open"] True/False and reruns.
+      - When open, a styled container renders BELOW the bar with theme + logout.
+      - On desktop this is a minor change in appearance (panel at top instead
+        of left) but is still clean and fast.
+      - On mobile it works perfectly — no sidebar clipping, no JS, no iframes.
+
+    The theme selectbox and logout button only exist once on the page
+    (inside this function), so there are zero duplicate-key risks.
     """
-    st.markdown(f"""
-    <style>
-        .mcxc-settings-bar {{
-            background: linear-gradient(to right, {MCXC_CRIMSON}, {MCXC_NAVY});
-            padding: 6px 14px 6px 16px;
-            border-radius: 0 0 8px 8px;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            margin-bottom: 10px;
-        }}
-        .mcxc-settings-btn {{
-            background: rgba(255,255,255,0.15);
-            color: #ffffff;
-            border: 1px solid rgba(255,255,255,0.4);
-            border-radius: 6px;
-            padding: 5px 16px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            letter-spacing: 0.3px;
-            transition: background 0.2s;
-        }}
-        .mcxc-settings-btn:hover, .mcxc-settings-btn:active {{
-            background: rgba(255,255,255,0.3);
-        }}
-    </style>
-    <div class="mcxc-settings-bar">
-        <button class="mcxc-settings-btn" onclick="mcxcOpenSidebar()">⚙️ Settings</button>
-    </div>
-    <script>
-        function mcxcOpenSidebar() {{
-            // Strategy 1: Streamlit >= 1.28
-            let toggle = document.querySelector('[data-testid="stSidebarCollapsedControl"]');
-            if (toggle) {{ toggle.click(); return; }}
-            // Strategy 2: older Streamlit versions
-            toggle = document.querySelector('[data-testid="collapsedControl"]');
-            if (toggle) {{ toggle.click(); return; }}
-            // Strategy 3: generic — any button in a collapsed/closed state
-            const btns = document.querySelectorAll('button');
-            for (const b of btns) {{
-                const label = b.getAttribute('aria-label') || '';
-                const expanded = b.getAttribute('aria-expanded');
-                if (label.toLowerCase().includes('sidebar') || expanded === 'false') {{
-                    b.click(); return;
-                }}
-            }}
-        }}
-    </script>
-    """, unsafe_allow_html=True)
+    if "settings_open" not in st.session_state:
+        st.session_state["settings_open"] = False
+
+    # --- Gradient bar with toggle button ---
+    btn_label = "✖ Close Settings" if st.session_state["settings_open"] else "⚙️ Settings"
+    bar_col, btn_col = st.columns([6, 1])
+    with bar_col:
+        st.markdown(f"""
+            <div style="
+                background: linear-gradient(to right, {MCXC_CRIMSON}, {MCXC_NAVY});
+                height: 38px;
+                border-radius: 0 0 8px 0;
+                margin-top: -4px;
+            "></div>
+        """, unsafe_allow_html=True)
+    with btn_col:
+        if st.button(btn_label, key="settings_toggle_btn", use_container_width=True):
+            st.session_state["settings_open"] = not st.session_state["settings_open"]
+            st.rerun()
+
+    # --- Collapsible settings panel ---
+    if st.session_state["settings_open"]:
+        panel_bg     = THEMES[st.session_state["theme"]]["sidebar_bg"]
+        panel_border = THEMES[st.session_state["theme"]]["metric_border"]
+        panel_text   = THEMES[st.session_state["theme"]]["text"]
+
+        st.markdown(f"""
+            <div style="
+                background-color: {panel_bg};
+                border: 1px solid {panel_border};
+                border-radius: 8px;
+                padding: 18px 24px 12px 24px;
+                margin-bottom: 16px;
+            ">
+                <p style="margin:0 0 12px 0; font-weight:700;
+                           font-size:16px; color:{panel_text};">
+                    ⚙️ Settings
+                </p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        # Narrow centre column so the panel doesn't stretch full-width on desktop
+        _, mid, _ = st.columns([1, 2, 1])
+        with mid:
+            theme_keys = list(THEMES.keys())
+            chosen = st.selectbox(
+                "App Theme",
+                theme_keys,
+                index=theme_keys.index(st.session_state["theme"]),
+                key="settings_theme_select"
+            )
+            if chosen != st.session_state["theme"]:
+                st.session_state["theme"] = chosen
+                st.rerun()
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.button(
+                "Log Out",
+                on_click=logout,
+                use_container_width=True,
+                key="settings_logout_btn"
+            )
+        st.markdown("---")
+
 
 def home_page():
     """
     Main page router — shown after login.
 
-    Settings architecture (no duplicate widgets):
-    - ALL settings controls (theme picker, logout) live ONLY in the sidebar.
-    - The main page has a single branded '⚙️ Settings' button whose only job
-      is to programmatically open the sidebar via JavaScript.
-    - This means there is exactly one selectbox and one logout button total,
-      eliminating any possibility of DuplicateElementKey errors.
-    - On desktop the sidebar is always visible anyway; the button is a minor
-      accent. On mobile it is the primary settings entry point.
+    Settings are handled entirely by _render_settings_overlay(), which renders
+    a branded bar + collapsible panel at the top of the page. st.sidebar is no
+    longer used, eliminating all mobile clipping issues.
     """
     user_role = str(st.session_state["role"]).capitalize()
 
-    # --- Sidebar: the one and only home for settings widgets ---
-    with st.sidebar:
-        st.subheader("⚙️ Settings")
-        theme_keys = list(THEMES.keys())
-        selected_theme = st.selectbox(
-            "App Theme",
-            theme_keys,
-            index=theme_keys.index(st.session_state["theme"]),
-            key="sidebar_theme_select"
-        )
-        if selected_theme != st.session_state["theme"]:
-            st.session_state["theme"] = selected_theme
-            st.rerun()
-        st.markdown("---")
-        st.button("Log Out", on_click=logout, use_container_width=True, key="sidebar_logout_btn")
-
-    # --- Branded bar + JS sidebar opener (mobile primary, desktop subtle) ---
-    _render_sidebar_opener_button()
+    # --- Settings bar (top of page, works on every screen size) ---
+    _render_settings_overlay()
 
     st.title(f"{user_role}: {st.session_state['first_name']} {st.session_state['last_name']}")
     st.markdown("---")
