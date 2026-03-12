@@ -130,4 +130,25 @@ else:
             if not user_races.empty:
                 five_k_races = user_races[user_races["Distance"].str.upper() == "5K"]
                 if not five_k_races.empty:
-                    fastest_sec = five_k_races["Total
+                    fastest_sec = five_k_races["Total_Time"].apply(time_to_seconds).replace(0, float('inf')).min()
+                    if fastest_sec != float('inf'): fastest_5k = seconds_to_time(fastest_sec)
+                    
+            col_m3.metric(label=f"Career 5K PR", value=fastest_5k)
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Load the sub-tabs we built in tab_profile!
+            sub_races, sub_workouts, sub_paces, sub_career = st.tabs(["Race Results", "Workouts", "Training Paces", "Career PRs"])
+            with sub_races: display_athlete_races(st.session_state["username"], sel_season)
+            with sub_workouts: display_athlete_workouts(st.session_state["username"], sel_season)
+            with sub_paces: display_suggested_paces(st.session_state["username"])
+            with sub_career: display_career_history(st.session_state["username"])
+            
+        with tab_rankings:
+            show_rankings_tab()
+            
+        with tab_resources:
+            st.subheader("Team Resources & Links")
+            if not docs_data.empty:
+                for _, row in docs_data.iterrows():
+                    if row["URL"]: st.markdown(f"- [{row['Title']}]({row['URL']})")
+                    else: st.markdown(f"- {row['Title']} (No Link Provided)")
