@@ -759,85 +759,77 @@ def password_reset_page():
 # 7. HOME PAGE ROUTER
 # ==========================================
 
-def _render_settings_panel():
-    """
-    Renders the theme selector and logout button.
-    Used in BOTH the desktop sidebar and the mobile inline panel
-    so there is only one source of truth for settings logic.
-    Returns True if a rerun was triggered (caller should not render further).
-    """
-    theme_keys = list(THEMES.keys())
-    selected_theme = st.selectbox(
-        "App Theme",
-        theme_keys,
-        index=theme_keys.index(st.session_state["theme"]),
-        key="settings_theme_select"
-    )
-    if selected_theme != st.session_state["theme"]:
-        st.session_state["theme"] = selected_theme
-        st.rerun()
-    st.markdown("---")
-    st.button("Log Out", on_click=logout, use_container_width=True, key="settings_logout_btn")
-
-
 def _render_mobile_settings_bar():
     """
-    Pinned branded settings bar shown at the TOP of every logged-in page.
-    Tapping '⚙️ Settings' toggles an inline panel open/closed.
-    Designed for mobile — always visible without needing to open the sidebar.
+    Branded settings toggle shown at the TOP of every logged-in page on mobile.
+    Hidden on desktop via CSS (display:none for screens wider than 768px),
+    so desktop users continue using the sidebar exactly as before.
 
-    Uses session state key 'mobile_settings_open' (bool) to track open/closed.
-    The bar is crimson-branded to match MCXC colors regardless of theme,
-    so it is always easy to find.
+    Tapping the button toggles an inline panel open/closed using the
+    session state key 'mobile_settings_open'.
+
+    IMPORTANT: All widgets here use keys prefixed 'mob_' to guarantee they
+    never collide with the identical sidebar widgets, which use 'sidebar_'
+    prefixed keys. Streamlit requires every on-screen widget to have a
+    unique key — this is the correct pattern when the same logical control
+    needs to appear in two places.
     """
     if "mobile_settings_open" not in st.session_state:
         st.session_state["mobile_settings_open"] = False
 
-    # Branded top bar with toggle button
-    btn_label = "✖ Close Settings" if st.session_state["mobile_settings_open"] else "⚙️ Settings"
+    # CSS: hide this entire block on wide screens; show only on narrow/mobile.
+    # The gradient bar is a visual accent above the toggle button.
     st.markdown(f"""
         <style>
-        /* Sticky top bar that sits above all content */
+        .mobile-settings-wrapper {{ display: none; }}
+        @media (max-width: 768px) {{
+            .mobile-settings-wrapper {{ display: block; }}
+        }}
         .mobile-settings-bar {{
-            position: sticky;
-            top: 0;
-            z-index: 999;
             background: linear-gradient(to right, {MCXC_CRIMSON}, {MCXC_NAVY});
-            padding: 6px 12px;
-            border-radius: 0 0 8px 8px;
-            margin-bottom: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
+            height: 6px;
+            border-radius: 3px;
+            margin-bottom: 8px;
         }}
         </style>
-        <div class="mobile-settings-bar"></div>
+        <div class="mobile-settings-wrapper">
+            <div class="mobile-settings-bar"></div>
+        </div>
     """, unsafe_allow_html=True)
 
-    # Streamlit button sits on top of the bar via column alignment
+    btn_label = "✖ Close Settings" if st.session_state["mobile_settings_open"] else "⚙️ Settings"
     _, btn_col = st.columns([5, 1])
     with btn_col:
-        if st.button(btn_label, key="mobile_settings_toggle", use_container_width=True):
+        if st.button(btn_label, key="mob_settings_toggle", use_container_width=True):
             st.session_state["mobile_settings_open"] = not st.session_state["mobile_settings_open"]
             st.rerun()
 
-    # Inline collapsible settings panel (only rendered when open)
+    # Inline collapsible panel — only rendered when toggled open
     if st.session_state["mobile_settings_open"]:
-        with st.container():
-            st.markdown(f"""
-                <div style="
-                    background-color: {THEMES[st.session_state['theme']]['sidebar_bg']};
-                    border: 1px solid {THEMES[st.session_state['theme']]['metric_border']};
-                    border-radius: 8px;
-                    padding: 16px 20px;
-                    margin-bottom: 16px;
-                ">
+        panel_bg = THEMES[st.session_state["theme"]]["sidebar_bg"]
+        panel_border = THEMES[st.session_state["theme"]]["metric_border"]
+        st.markdown(f"""
+            <div style="background-color:{panel_bg}; border:1px solid {panel_border};
+                        border-radius:8px; padding:16px 20px; margin-bottom:16px;">
                 <strong>⚙️ Settings</strong>
-                </div>
-            """, unsafe_allow_html=True)
-            _col1, _col2, _col3 = st.columns([1, 2, 1])
-            with _col2:
-                _render_settings_panel()
+            </div>
+        """, unsafe_allow_html=True)
+        _col1, _col2, _col3 = st.columns([1, 2, 1])
+        with _col2:
+            # Theme selector — 'mob_' prefix keeps key unique vs sidebar widget
+            theme_keys = list(THEMES.keys())
+            mob_theme = st.selectbox(
+                "App Theme",
+                theme_keys,
+                index=theme_keys.index(st.session_state["theme"]),
+                key="mob_theme_select"
+            )
+            if mob_theme != st.session_state["theme"]:
+                st.session_state["theme"] = mob_theme
+                st.rerun()
+            st.markdown("---")
+            # Logout — 'mob_' prefix keeps key unique vs sidebar widget
+            st.button("Log Out", on_click=logout, use_container_width=True, key="mob_logout_btn")
         st.markdown("---")
 
 
@@ -845,19 +837,35 @@ def home_page():
     """
     Main page router — shown after login.
     Renders:
-      1. Desktop sidebar (theme + logout) — hidden on mobile by Streamlit automatically
-      2. Mobile settings bar pinned at top — always accessible on phone
-      3. Page title
-      4. Coach or Athlete view based on role
+      1. Desktop sidebar: theme selector + logout, works exactly as before.
+      2. Mobile settings bar: pinned at top, hidden on desktop via CSS.
+         Always one tap away on a phone without needing landscape mode.
+      3. Page title and role-based view (Coach or Athlete).
+
+    Widget key convention:
+      sidebar_*  — widgets inside st.sidebar
+      mob_*      — widgets inside the mobile settings bar
+    This prevents Streamlit DuplicateElementKey errors when both are on-screen.
     """
     user_role = str(st.session_state["role"]).capitalize()
 
-    # --- Desktop sidebar (works as before on desktop/landscape) ---
+    # --- Desktop sidebar (unchanged behavior) ---
     with st.sidebar:
         st.subheader("⚙️ Settings")
-        _render_settings_panel()
+        theme_keys = list(THEMES.keys())
+        selected_theme = st.selectbox(
+            "App Theme",
+            theme_keys,
+            index=theme_keys.index(st.session_state["theme"]),
+            key="sidebar_theme_select"
+        )
+        if selected_theme != st.session_state["theme"]:
+            st.session_state["theme"] = selected_theme
+            st.rerun()
+        st.markdown("---")
+        st.button("Log Out", on_click=logout, use_container_width=True, key="sidebar_logout_btn")
 
-    # --- Mobile-first pinned settings bar (top of page, always visible) ---
+    # --- Mobile settings bar (CSS-hidden on desktop) ---
     _render_mobile_settings_bar()
 
     st.title(f"{user_role}: {st.session_state['first_name']} {st.session_state['last_name']}")
