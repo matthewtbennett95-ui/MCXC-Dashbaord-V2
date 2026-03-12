@@ -761,28 +761,27 @@ def password_reset_page():
 
 def _render_sidebar_opener_button():
     """
-    Renders a small branded '⚙️ Settings' button at the top of the main page.
-    Its ONLY job is to fire a JavaScript click on Streamlit's native sidebar
-    toggle button, which slides the sidebar into view on mobile.
+    Renders a branded gradient bar with a Settings button at the top of every
+    logged-in page. Clicking it programmatically opens the Streamlit sidebar
+    (the native left panel holding the theme picker and logout button).
 
-    Why this approach instead of duplicate widgets:
-    - There is only ONE set of settings widgets — they live in the sidebar.
-    - This button is purely a JS trigger; it creates no duplicate selectboxes
-      or buttons, so there is zero risk of DuplicateElementKey errors.
-    - On desktop the sidebar is always visible, so this button is styled to
-      blend in quietly (small, right-aligned). On mobile it is the primary
-      way to reach settings since the Streamlit hamburger menu is hidden.
-    - We use components.html() so the JS runs in the browser context and can
-      reach window.parent.document where Streamlit's sidebar toggle lives.
+    IMPORTANT — why st.markdown instead of components.html:
+    components.html() renders inside a sandboxed <iframe>. Browsers block that
+    iframe from accessing window.parent.document, so any JS click on the
+    sidebar toggle is silently swallowed. st.markdown(unsafe_allow_html=True)
+    injects HTML+JS directly into the main page document, giving the script
+    unrestricted access to Streamlit's own DOM elements.
+
+    The JS tries three selector strategies for cross-version compatibility:
+      1. [data-testid="stSidebarCollapsedControl"]  — Streamlit >= 1.28
+      2. [data-testid="collapsedControl"]            — older versions
+      3. button[aria-expanded="false"]               — generic last resort
     """
-    # Gradient accent bar + opener button rendered via HTML/JS
-    # The button fires a click() on Streamlit's own [data-testid="stSidebarCollapsedControl"]
-    # or the sidebar chevron, whichever is present in the current Streamlit version.
-    opener_html = f"""
+    st.markdown(f"""
     <style>
         .mcxc-settings-bar {{
             background: linear-gradient(to right, {MCXC_CRIMSON}, {MCXC_NAVY});
-            padding: 6px 12px 6px 16px;
+            padding: 6px 14px 6px 16px;
             border-radius: 0 0 8px 8px;
             display: flex;
             align-items: center;
@@ -794,7 +793,7 @@ def _render_sidebar_opener_button():
             color: #ffffff;
             border: 1px solid rgba(255,255,255,0.4);
             border-radius: 6px;
-            padding: 5px 14px;
+            padding: 5px 16px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
@@ -802,34 +801,32 @@ def _render_sidebar_opener_button():
             transition: background 0.2s;
         }}
         .mcxc-settings-btn:hover, .mcxc-settings-btn:active {{
-            background: rgba(255,255,255,0.28);
+            background: rgba(255,255,255,0.3);
         }}
     </style>
     <div class="mcxc-settings-bar">
-        <button class="mcxc-settings-btn" onclick="openSidebar()">⚙️ Settings</button>
+        <button class="mcxc-settings-btn" onclick="mcxcOpenSidebar()">⚙️ Settings</button>
     </div>
     <script>
-        function openSidebar() {{
-            // Try the collapsed-state toggle button first (Streamlit >= 1.28)
-            const doc = window.parent.document;
-            let toggle = doc.querySelector('[data-testid="stSidebarCollapsedControl"]');
+        function mcxcOpenSidebar() {{
+            // Strategy 1: Streamlit >= 1.28
+            let toggle = document.querySelector('[data-testid="stSidebarCollapsedControl"]');
             if (toggle) {{ toggle.click(); return; }}
-            // Fallback: the expand chevron button used in older versions
-            toggle = doc.querySelector('[data-testid="collapsedControl"]');
+            // Strategy 2: older Streamlit versions
+            toggle = document.querySelector('[data-testid="collapsedControl"]');
             if (toggle) {{ toggle.click(); return; }}
-            // Last resort: any button that contains the sidebar nav icon
-            const btns = doc.querySelectorAll('button');
+            // Strategy 3: generic — any button in a collapsed/closed state
+            const btns = document.querySelectorAll('button');
             for (const b of btns) {{
-                if (b.getAttribute('aria-label') === 'Open Sidebar' ||
-                    b.getAttribute('aria-expanded') === 'false') {{
+                const label = b.getAttribute('aria-label') || '';
+                const expanded = b.getAttribute('aria-expanded');
+                if (label.toLowerCase().includes('sidebar') || expanded === 'false') {{
                     b.click(); return;
                 }}
             }}
         }}
     </script>
-    """
-    components.html(opener_html, height=52)
-
+    """, unsafe_allow_html=True)
 
 def home_page():
     """
