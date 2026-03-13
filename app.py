@@ -1662,9 +1662,15 @@ def _printable_attendance():
 # ==========================================
 def _tab_data_entry():
     """
-    Everything the coach touches AFTER a practice or meet:
-      - Race Results: enter/edit finish times for any existing meet
-      - Workouts: log splits from a completed practice, or edit/delete
+    Everything the coach touches AFTER a practice or meet.
+
+    Race Results sub-options:
+      - Enter / Edit Times  : type finish times for a race
+      - Edit Meet Details   : rename meet, change date, rename races,
+                              change distance, remove runners from a race
+    Workouts sub-options:
+      - Log New Workout     : enter splits from today's practice
+      - Edit / Delete       : fix an existing session or remove an athlete row
     """
     st.subheader("Data Entry")
     st.markdown("Enter results after the event. To create a new meet or print a workout sheet, use the **Printables** tab.")
@@ -1672,15 +1678,24 @@ def _tab_data_entry():
     st.markdown("---")
 
     if de_type == "Race Results":
-        _de_race_results()
+        race_action = st.radio(
+            "Action:",
+            ["Enter / Edit Times", "Edit Meet Details"],
+            horizontal=True,
+            key="race_action_radio"
+        )
+        st.markdown("---")
+        if race_action == "Enter / Edit Times":
+            _de_race_results()
+        elif race_action == "Edit Meet Details":
+            _de_edit_meet()
+
     elif de_type == "Workouts":
         _de_workouts()
 
 
 def _de_race_results():
     """Enter or edit race times for an existing meet."""
-    st.subheader("Race Results Entry")
-    st.markdown("Select the meet and race, then type in finish times.")
     active_races = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]
     existing_meets = active_races["Meet_Name"].dropna().unique().tolist()
 
@@ -1706,7 +1721,7 @@ def _de_race_results():
                for _, row in unassigned.sort_values("Last_Name").iterrows()}
 
     if un_opts:
-        with st.expander("➕ Add Walk-On / Missing Runner to this Race"):
+        with st.expander("Add Walk-On / Missing Runner to this Race"):
             add_runners = st.multiselect("Select runners to add:",
                                          options=list(un_opts.keys()),
                                          format_func=lambda x: un_opts[x])
@@ -1733,9 +1748,9 @@ def _de_race_results():
     col_config = {
         "Username": None,
         "Athlete Name": st.column_config.TextColumn("Athlete Name", disabled=True),
-        "Mile 1":   st.column_config.TextColumn("Mile 1 Split"),
-        "Mile 2":   st.column_config.TextColumn("Mile 2 Split"),
-        "Total Time": st.column_config.TextColumn("Total Finish Time"),
+        "Mile 1":       st.column_config.TextColumn("Mile 1 Split"),
+        "Mile 2":       st.column_config.TextColumn("Mile 2 Split"),
+        "Total Time":   st.column_config.TextColumn("Total Finish Time"),
     }
     st.caption("Type times as-is (e.g. 18:45). Blank rows are ignored in rankings.")
     edited_df = st.data_editor(pd.DataFrame(grid_data), hide_index=True,
@@ -1749,8 +1764,8 @@ def _de_race_results():
                 mask = ((races_data["Meet_Name"] == sel_meet) &
                         (races_data["Race_Name"] == sel_race) &
                         (races_data["Username"] == row["Username"]))
-                races_data.loc[mask, "Mile_1"]     = str(row["Mile 1"]).strip()   if pd.notna(row["Mile 1"])    else ""
-                races_data.loc[mask, "Mile_2"]     = str(row["Mile 2"]).strip()   if pd.notna(row["Mile 2"])    else ""
+                races_data.loc[mask, "Mile_1"]     = str(row["Mile 1"]).strip()    if pd.notna(row["Mile 1"])    else ""
+                races_data.loc[mask, "Mile_2"]     = str(row["Mile 2"]).strip()    if pd.notna(row["Mile 2"])    else ""
                 races_data.loc[mask, "Total_Time"] = str(row["Total Time"]).strip() if pd.notna(row["Total Time"]) else ""
             with st.spinner("Saving..."): conn.update(worksheet="Races", data=races_data)
             st.success("Results saved!"); st.cache_data.clear(); st.rerun()
@@ -1761,6 +1776,114 @@ def _de_race_results():
             with st.spinner("Deleting..."): conn.update(worksheet="Races", data=keep)
             st.success("Race deleted."); st.cache_data.clear(); st.rerun()
 
+
+def _de_edit_meet():
+    """
+    Edit meet-level and race-level details after a meet has been created.
+
+    What can be changed here:
+      - Meet name (renames all rows for that meet in the Races sheet)
+      - Meet date (updates all rows for that meet)
+      - Per race: race title, distance
+      - Per race: remove specific runners (their row is deleted from Races)
+
+    What cannot be changed here (intentionally):
+      - Individual split/finish times — use Enter / Edit Times for that
+      - Meet weights — use Manage tab
+    """
+    st.subheader("Edit Meet Details")
+    active_races = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]
+    existing_meets = active_races["Meet_Name"].dropna().unique().tolist()
+
+    if not existing_meets:
+        st.info("No active meets found.")
+        return
+
+    col1, _ = st.columns([1, 2])
+    with col1:
+        sel_meet = st.selectbox("Select Meet to Edit", ["-- Select --"] + existing_meets,
+                                key="edit_meet_select")
+    if sel_meet == "-- Select --":
+        return
+
+    meet_rows = races_data[races_data["Meet_Name"] == sel_meet].copy()
+    cur_date  = meet_rows["Date"].iloc[0] if not meet_rows.empty else None
+
+    st.markdown("---")
+    st.markdown("### Meet Header")
+
+    h1, h2 = st.columns(2)
+    with h1:
+        new_meet_name = st.text_input("Meet Name", value=sel_meet,
+                                       key="edit_meet_name", autocomplete="off")
+    with h2:
+        try:   date_val = pd.to_datetime(cur_date).date()
+        except: date_val = datetime.date.today()
+        new_date = st.date_input("Meet Date", value=date_val, key="edit_meet_date")
+
+    if st.button("💾 Save Meet Name & Date", key="save_meet_header"):
+        formatted_new_date = pd.to_datetime(new_date).strftime("%Y-%m-%d")
+        new_season = calculate_season(formatted_new_date)
+        mask = races_data["Meet_Name"] == sel_meet
+        races_data.loc[mask, "Meet_Name"] = new_meet_name
+        races_data.loc[mask, "Date"]      = formatted_new_date
+        races_data.loc[mask, "Season"]    = new_season
+        with st.spinner("Saving..."): conn.update(worksheet="Races", data=races_data)
+        st.success(f"Meet updated to '{new_meet_name}' on {formatted_new_date}.")
+        st.cache_data.clear(); st.rerun()
+
+    st.markdown("---")
+    st.markdown("### Races Within This Meet")
+    st.markdown("Expand each race to rename it, change the distance, or remove runners.")
+
+    race_names = meet_rows["Race_Name"].dropna().unique().tolist()
+
+    for race_name in race_names:
+        race_rows = meet_rows[meet_rows["Race_Name"] == race_name]
+        cur_dist  = race_rows["Distance"].iloc[0] if not race_rows.empty else "5K"
+
+        with st.expander(f"{race_name}  ({cur_dist})  — {len(race_rows)} runner(s)"):
+
+            # --- Rename race / change distance ---
+            rc1, rc2 = st.columns(2)
+            new_race_name = rc1.text_input("Race Title",    value=race_name, key=f"rname_{race_name}", autocomplete="off")
+            new_dist      = rc2.text_input("Distance",      value=cur_dist,  key=f"rdist_{race_name}", autocomplete="off")
+
+            if st.button("💾 Save Race Title & Distance", key=f"save_race_{race_name}"):
+                mask = ((races_data["Meet_Name"]  == sel_meet) &
+                        (races_data["Race_Name"]  == race_name))
+                races_data.loc[mask, "Race_Name"] = new_race_name
+                races_data.loc[mask, "Distance"]  = new_dist
+                with st.spinner("Saving..."): conn.update(worksheet="Races", data=races_data)
+                st.success(f"Race updated to '{new_race_name}' ({new_dist}).")
+                st.cache_data.clear(); st.rerun()
+
+            st.markdown("**Remove Runners from this Race**")
+            st.caption("Removing a runner deletes their entry row entirely. Their times are lost if already entered.")
+
+            runner_opts = {}
+            for _, r in race_rows.iterrows():
+                match = roster_data[roster_data["Username"] == r["Username"]]
+                name  = f"{match.iloc[0]['First_Name']} {match.iloc[0]['Last_Name']}" if not match.empty else r["Username"]
+                runner_opts[r["Username"]] = name
+
+            runners_to_remove = st.multiselect(
+                "Select runners to remove:",
+                options=list(runner_opts.keys()),
+                format_func=lambda x: runner_opts[x],
+                key=f"remove_runners_{race_name}"
+            )
+            if runners_to_remove:
+                if st.button("🗑️ Remove Selected Runners", key=f"remove_btn_{race_name}"):
+                    keep = races_data[~(
+                        (races_data["Meet_Name"] == sel_meet) &
+                        (races_data["Race_Name"] == race_name) &
+                        (races_data["Username"].isin(runners_to_remove))
+                    )]
+                    with st.spinner("Removing runners..."):
+                        conn.update(worksheet="Races", data=keep)
+                    st.success(f"Removed {len(runners_to_remove)} runner(s) from {race_name}.")
+                    st.cache_data.clear(); st.rerun()
 
 def _de_workouts():
     """Log new workout splits or edit/delete an existing workout session."""
