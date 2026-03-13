@@ -185,35 +185,358 @@ def get_weather_for_date(date_str):
         return "Can't access weather data"
     except: return "Can't access weather data"
 
-def wrap_html_for_print(title, body_content, is_attendance=False):
-    page_settings = "size: portrait;" if is_attendance else "size: auto;"
+# ==========================================
+# PRINT HELPERS
+# ==========================================
+
+def wrap_html_for_print(title, body_content, is_attendance=False, force_landscape=False):
+    """
+    Shared HTML shell for all printable sheets.
+
+    Improvements over original:
+    - force_landscape=True sets @page to landscape explicitly (used when rep
+      count is high on workout sheets).
+    - table-layout:fixed + font-size scaling via CSS clamp() so columns shrink
+      gracefully instead of overflowing.
+    - th/td use overflow:hidden + text-overflow:ellipsis as a last resort.
+    - @page margin kept at 0 so browser never prints its own date/URL header.
+      The body padding of 0.4in at print time gives clean white margins.
+    """
+    if force_landscape:
+        page_css = "size: landscape; margin: 0;"
+    elif is_attendance:
+        page_css = "size: portrait; margin: 0;"
+    else:
+        page_css = "size: auto; margin: 0;"
+
     return f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>{title}</title>
 <style>
-    :root {{ --border-color: #cbd5e1; --text-main: #1e293b; --text-muted: #64748b; --font-family: 'Inter', system-ui, -apple-system, sans-serif; --mcxc-crimson: #8B2331; }}
-    body {{ font-family: var(--font-family); padding: 20px; margin: 0; color: var(--text-main); background-color: #ffffff; }}
-    @page {{ margin: 0; {page_settings} }}
-    h2 {{ margin: 0 0 10px 0; font-size: 22px; font-weight: 700; text-align: center; color: var(--text-main); letter-spacing: -0.5px; page-break-after: avoid; break-after: avoid; }}
-    h3 {{ margin: 15px 0 0 0; font-size: 14px; font-weight: 600; background-color: #f8fafc; padding: 10px 15px; border: 1px solid var(--border-color); border-radius: 8px 8px 0 0; border-bottom: none; color: var(--text-main); page-break-after: avoid; break-after: avoid; }}
-    table {{ width: 100%; border-collapse: collapse; margin-bottom: 25px; page-break-inside: avoid; break-inside: avoid; border: 1px solid var(--border-color); }}
+    :root {{
+        --border-color: #cbd5e1;
+        --text-main: #1e293b;
+        --text-muted: #64748b;
+        --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        --mcxc-crimson: #8B2331;
+        --mcxc-navy: #0C223F;
+    }}
+    body {{
+        font-family: var(--font-family);
+        padding: 16px;
+        margin: 0;
+        color: var(--text-main);
+        background: #ffffff;
+    }}
+    @page {{ {page_css} }}
+
+    /* ---- Header ---- */
+    .sheet-header {{
+        border-left: 5px solid var(--mcxc-crimson);
+        padding: 6px 0 6px 12px;
+        margin-bottom: 16px;
+    }}
+    .sheet-header h1 {{
+        margin: 0; font-size: 18px; font-weight: 700;
+        color: var(--mcxc-navy); letter-spacing: -0.3px;
+    }}
+    .sheet-header .sub {{
+        margin: 2px 0 0 0; font-size: 12px; color: var(--text-muted);
+    }}
+
+    /* ---- Section headings (race / gender blocks) ---- */
+    h2 {{
+        margin: 14px 0 0 0; font-size: 13px; font-weight: 700;
+        background: var(--mcxc-navy); color: #ffffff;
+        padding: 7px 12px; border-radius: 4px 4px 0 0;
+        page-break-after: avoid; break-after: avoid;
+        text-transform: uppercase; letter-spacing: 0.5px;
+    }}
+    h3 {{
+        margin: 14px 0 0 0; font-size: 12px; font-weight: 600;
+        background: #f1f5f9; color: var(--text-main);
+        padding: 6px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px 4px 0 0; border-bottom: none;
+        page-break-after: avoid; break-after: avoid;
+    }}
+
+    /* ---- Tables ---- */
+    table {{
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 20px;
+        table-layout: fixed;          /* forces columns to share space evenly */
+        page-break-inside: avoid;
+        break-inside: avoid;
+        border: 1px solid var(--border-color);
+    }}
     tr {{ page-break-inside: avoid; page-break-after: auto; }}
-    th, td {{ padding: 10px 4px; border: 1px solid var(--border-color); text-align: center; font-size: 12px; }}
-    th:first-child, td:first-child {{ text-align: left; padding-left: 12px; }}
-    th {{ color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; font-size: 11px; background: #f8fafc; }}
-    .print-btn {{ background: var(--mcxc-crimson); color: #ffffff; border: none; padding: 12px 24px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; text-transform: uppercase; letter-spacing: 0.5px; box-shadow: 0 4px 6px -1px rgba(139, 35, 49, 0.3); margin-bottom: 10px; }}
-    .print-btn:hover {{ filter: brightness(1.1); transform: translateY(-1px); }}
-    .keep-together {{ page-break-inside: avoid; break-inside: avoid; margin-bottom: 25px; }}
-    .no-print-container {{ text-align: center; margin-bottom: 30px; padding: 20px; background: #f0f4f8; border-radius: 12px; border: 1px solid var(--border-color); }}
-    @media print {{ .no-print {{ display: none !important; }} body {{ padding: 0.5in; }} * {{ -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }} }}
+    th, td {{
+        border: 1px solid var(--border-color);
+        text-align: center;
+        font-size: clamp(8px, 1.1vw, 12px);   /* shrinks gracefully */
+        padding: 7px 3px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }}
+    th:first-child, td:first-child {{
+        text-align: left;
+        padding-left: 10px;
+        width: 22%;           /* name column gets a fixed share */
+        white-space: normal;  /* allow names to wrap if needed */
+    }}
+    th {{
+        color: var(--text-muted); font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.4px;
+        font-size: clamp(7px, 1vw, 11px);
+        background: #f8fafc;
+    }}
+
+    /* ---- Rest cycle mini-table (workout sheets) ---- */
+    .rest-table {{ margin-top: 12px; }}
+    .rest-table h3 {{ background: #fef3c7; color: #92400e; border-color: #fcd34d; }}
+    .rest-table table {{ font-size: clamp(7px, 1vw, 11px); }}
+
+    /* ---- Page-break helpers ---- */
+    .keep-together {{ page-break-inside: avoid; break-inside: avoid; margin-bottom: 20px; }}
+    .page-break    {{ page-break-before: always; break-before: always; }}
+
+    /* ---- Print button (screen only) ---- */
+    .no-print-container {{
+        text-align: center; margin-bottom: 24px; padding: 16px;
+        background: #f0f4f8; border-radius: 10px;
+        border: 1px solid var(--border-color);
+    }}
+    .print-btn {{
+        background: var(--mcxc-crimson); color: #ffffff; border: none;
+        padding: 10px 22px; border-radius: 6px; font-size: 14px;
+        font-weight: 600; cursor: pointer; text-transform: uppercase;
+        letter-spacing: 0.5px; margin-bottom: 8px;
+        box-shadow: 0 4px 6px -1px rgba(139,35,49,0.3);
+    }}
+    .print-btn:hover {{ filter: brightness(1.1); }}
+
+    @media print {{
+        .no-print {{ display: none !important; }}
+        body {{ padding: 0.4in; }}
+        * {{ -webkit-print-color-adjust: exact !important;
+             print-color-adjust: exact !important; }}
+    }}
 </style>
 </head><body>
-    <div class="no-print no-print-container">
-        <button class="print-btn" onclick="window.print()">🖨️ Click Here to Print / Save as PDF</button>
-        <p style="color: var(--text-muted); font-size: 13px; margin: 10px 0 0 0;"><strong>Pro Tip:</strong> For large rosters, set your printer "Scale" to <i>Fit to Page</i>.</p>
-        <p style="color: var(--text-muted); font-size: 13px; margin: 5px 0 0 0;"><i>If you still see dates/URLs on the print preview, uncheck "Headers and Footers" in your print dialog box!</i></p>
-    </div>
-    {body_content}
+<div class="no-print no-print-container">
+    <button class="print-btn" onclick="window.print()">🖨️ Click Here to Print / Save as PDF</button>
+    <p style="color:var(--text-muted);font-size:13px;margin:6px 0 0 0;">
+        <strong>Pro Tip:</strong> In the print dialog set <em>Scale → Fit to Page</em> if anything looks cut off.
+    </p>
+    <p style="color:var(--text-muted);font-size:12px;margin:4px 0 0 0;">
+        Uncheck <em>Headers and Footers</em> if you see a date/URL on the printout.
+    </p>
+</div>
+{body_content}
 </body></html>"""
+
+
+def _get_athlete_pr(uname, races_df, season=None):
+    """
+    Returns (time_str, source_label) for an athlete's best 5K or 2-Mile.
+    Used to sort split sheets by PR and show the time on workout sheets.
+    If season is given, prefers that season's PR; falls back to all-time.
+    """
+    active = races_df[races_df["Active"].isin(ACTIVE_FLAGS)].copy()
+    active["sec"] = active["Total_Time"].apply(time_to_seconds)
+    active = active[(active["Username"] == uname) & (active["sec"] > 0)]
+    if active.empty:
+        return None, None
+
+    for dist in ["5K", "2 MILE"]:
+        subset = active[active["Distance"].str.upper() == dist]
+        if season:
+            s_subset = subset[subset["Season"] == season]
+            if not s_subset.empty:
+                best = s_subset.loc[s_subset["sec"].idxmin()]
+                return seconds_to_time(best["sec"]), f"{season} {dist} PR"
+        if not subset.empty:
+            best = subset.loc[subset["sec"].idxmin()]
+            return seconds_to_time(best["sec"]), f"All-Time {dist} PR"
+    return None, None
+
+
+def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None, meet_date=None):
+    """
+    Builds the HTML body for a meet split sheet.
+
+    Changes from original:
+    - Date shown in the header.
+    - Athletes within each race sorted by their current-season PR (fastest
+      first) so they appear in likely finish order — easier to catch at splits.
+    - Prior-best logic unchanged: shows best at this specific meet, or overall
+      5K PR labelled as (PR) if no meet-specific history exists.
+    """
+    active_athletes = roster_df[roster_df["Role"].str.upper() == "ATHLETE"].copy()
+    athlete_opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}"
+                    for _, row in active_athletes.iterrows()}
+
+    def get_prior_time(uname, meet_name):
+        prior = races_df[(races_df["Username"] == uname) &
+                         (races_df["Meet_Name"] == meet_name) &
+                         (races_df["Total_Time"].str.strip() != "")].copy()
+        if not prior.empty:
+            prior["sec"] = prior["Total_Time"].apply(time_to_seconds)
+            prior = prior[prior["sec"] > 0]
+            if not prior.empty:
+                return seconds_to_time(prior["sec"].min())
+        all_5k = races_df[(races_df["Username"] == uname) &
+                          (races_df["Distance"].str.upper() == "5K") &
+                          (races_df["Total_Time"].str.strip() != "")].copy()
+        if not all_5k.empty:
+            all_5k["sec"] = all_5k["Total_Time"].apply(time_to_seconds)
+            all_5k = all_5k[all_5k["sec"] > 0]
+            if not all_5k.empty:
+                return f"{seconds_to_time(all_5k['sec'].min())} (PR)"
+        return "—"
+
+    date_str = ""
+    if meet_date:
+        try: date_str = pd.to_datetime(meet_date).strftime("%B %d, %Y")
+        except: date_str = str(meet_date)
+
+    html  = f'<div class="sheet-header">'
+    html += f'<h1>{p_meet} — Split Sheet</h1>'
+    if date_str:
+        html += f'<p class="sub">{date_str}</p>'
+    html += '</div>'
+
+    meet_rows = races_df[races_df["Meet_Name"] == p_meet]
+    races_to_show = race_list if race_list else [
+        {"name": rn,
+         "dist": meet_rows[meet_rows["Race_Name"] == rn]["Distance"].iloc[0]
+                 if not meet_rows[meet_rows["Race_Name"] == rn].empty else ""}
+        for rn in meet_rows["Race_Name"].unique()
+    ]
+
+    for race in races_to_show:
+        r_name   = race["name"] if isinstance(race, dict) else race
+        r_dist   = race.get("dist", "") if isinstance(race, dict) else ""
+        runners  = race.get("runners",
+                    meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist()
+                   ) if isinstance(race, dict) else \
+                   meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist()
+
+        # Sort runners by current-season PR fastest → slowest
+        def runner_sort_key(uname):
+            t, _ = _get_athlete_pr(uname, races_df, season=CURRENT_SEASON)
+            return time_to_seconds(t) if t else 9999
+
+        runners_sorted = sorted(runners, key=runner_sort_key)
+
+        html += f"<div class='keep-together'>"
+        html += f"<h2>{r_name} ({r_dist})</h2>"
+        html += ("<table><tr>"
+                 "<th>Athlete</th>"
+                 "<th>Prior Best at Meet</th>"
+                 "<th>1 Mile</th><th>2 Mile</th><th>Finish</th>"
+                 "</tr>")
+        for uname in runners_sorted:
+            name = athlete_opts.get(uname, uname)
+            prior = get_prior_time(uname, p_meet)
+            html += f"<tr><td>{name}</td><td>{prior}</td><td></td><td></td><td></td></tr>"
+        html += "</table></div>"
+
+    return html
+
+
+def _build_workout_sheet_html(w_type, w_dist, w_date, rep_count, roster_df, races_df, rest_df):
+    """
+    Builds the HTML body for a printable workout sheet.
+
+    Layout (matches your paper format):
+    ┌─────────────────────────────────────────────────┐
+    │  [Boys/Girls] Workout Sheet                     │
+    │  [Workout Type] — [Distance] — [Date]           │
+    ├──────────────┬───┬───┬───┬───┬───┬─────────────┤
+    │ Athlete      │ 1 │ 2 │ 3 │ 4 │ 5 │ ...         │
+    ├──────────────┼───┼───┼───┼───┼───┤             │
+    │ ...          │   │   │   │   │   │             │
+    └──────────────┴───┴───┴───┴───┴───┴─────────────┘
+    [Rest Cycle table for this workout type]
+
+    Boys and Girls are separate <div class="page-break"> sections so they
+    print on separate pages from a single downloaded file.
+
+    force_landscape is returned as a boolean so the caller can pass it to
+    wrap_html_for_print — triggered when rep_count > 7.
+    """
+    try:
+        date_str = pd.to_datetime(w_date).strftime("%B %d, %Y")
+    except:
+        date_str = str(w_date)
+
+    # Rep column headers
+    rep_headers = "".join(f"<th>{i}</th>" for i in range(1, rep_count + 1))
+
+    # Rest cycle rows relevant to this workout type
+    rest_subset = rest_df[rest_df["Workout"].str.contains(w_type, case=False, na=False)]
+    rest_html = ""
+    if not rest_subset.empty:
+        rest_rows = "".join(
+            f"<tr><td style='text-align:left;padding-left:8px;'>{row['Pace / Time']}</td>"
+            f"<td>{row['Cycle / Rest']}</td></tr>"
+            for _, row in rest_subset.iterrows()
+        )
+        rest_html = f"""
+        <div class="rest-table keep-together">
+            <h3>Rest Cycle — {w_type} ({w_dist})</h3>
+            <table>
+                <tr><th style="text-align:left;padding-left:8px;">VDOT / Pace Range</th>
+                    <th>Cycle / Rest</th></tr>
+                {rest_rows}
+            </table>
+        </div>"""
+
+    html_parts = []
+    for gender_label, gender_val in [("Boys", "Male"), ("Girls", "Female")]:
+        athletes = roster_df[
+            (roster_df["Role"].str.upper() == "ATHLETE") &
+            (roster_df["Active_Clean"].isin(ACTIVE_FLAGS)) &
+            (roster_df["Gender"].str.title() == gender_val)
+        ].sort_values(["Last_Name", "First_Name"])
+
+        if athletes.empty:
+            continue
+
+        athlete_rows = ""
+        for _, row in athletes.iterrows():
+            pr_time, _ = _get_athlete_pr(row["Username"], races_df, season=CURRENT_SEASON)
+            pr_display = pr_time if pr_time else "—"
+            blank_reps = "".join("<td></td>" for _ in range(rep_count))
+            athlete_rows += (
+                f"<tr>"
+                f"<td style='text-align:left;padding-left:8px;'>"
+                f"{row['Last_Name']}, {row['First_Name']}"
+                f"<span style='font-size:10px;color:#64748b;'> ({pr_display})</span>"
+                f"</td>"
+                f"{blank_reps}"
+                f"</tr>"
+            )
+
+        part  = '<div class="sheet-header">'
+        part += f'<h1>{gender_label} Workout Sheet</h1>'
+        part += f'<p class="sub">{w_type} — {w_dist} &nbsp;|&nbsp; {date_str}</p>'
+        part += '</div>'
+        part += f"<div class='keep-together'>"
+        part += f"<h2>{gender_label} — {w_type} ({w_dist})</h2>"
+        part += f"<table><tr><th>Athlete (Current PR)</th>{rep_headers}</tr>"
+        part += athlete_rows
+        part += "</table></div>"
+        part += rest_html
+        html_parts.append(part)
+
+    # Join pages with a page-break div between Boys and Girls
+    body = '<div class="page-break"></div>'.join(html_parts)
+    force_landscape = rep_count > 7
+    return body, force_landscape
 
 # ==========================================
 # 3. DATABASE CONNECTION & CLEANUP
@@ -868,577 +1191,690 @@ def home_page():
         _athlete_view()
 
 # ---- COACH VIEW ----
+
+# ---- COACH VIEW ----
 def _coach_view():
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Athlete Lookup", "Roster Management", "Data Entry", "Team Rankings", "Meet Setup & Printables", "Team Resources"])
+    """
+    Coach tab structure:
+      1. Athlete Lookup   — view any athlete's stats
+      2. 📋 Printables    — create/print meet sheets, workout sheets, attendance
+      3. ✏️ Data Entry    — enter race results and workout splits after the event
+      4. 🏆 Rankings      — team leaderboard and master grid
+      5. 👥 Roster        — manage members
+      6. ⚙️ Manage        — meet weights, archive, VDOT/rest tables, documents
+    """
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "Athlete Lookup",
+        "📋 Printables",
+        "✏️ Data Entry",
+        "🏆 Rankings",
+        "👥 Roster",
+        "⚙️ Manage",
+    ])
+    with tab1: _tab_athlete_lookup()
+    with tab2: _tab_printables()
+    with tab3: _tab_data_entry()
+    with tab4: show_rankings_tab()
+    with tab5: _tab_roster_management()
+    with tab6: _tab_manage()
 
-    with tab1:
-        _tab_athlete_lookup()
-    with tab2:
-        _tab_roster_management()
-    with tab3:
-        _tab_data_entry()
-    with tab4:
-        show_rankings_tab()
-    with tab5:
-        _tab_meet_setup()
-    with tab6:
-        st.subheader("Manage Team Documents")
-        st.info("Paste the 'Publish to Web' link of your Google Docs below. They will be beautifully embedded on every athlete's dashboard. (To get this link: Open your Google Doc → File → Share → Publish to Web → Copy Link)")
-        edited_docs = st.data_editor(docs_data, num_rows="dynamic", use_container_width=True)
-        if st.button("💾 Save Documents", type="primary"):
-            try:
-                with st.spinner("Saving documents..."): conn.update(worksheet="Documents", data=edited_docs)
-                st.success("Documents updated successfully!")
+
+# ==========================================
+# COACH TAB: PRINTABLES
+# ==========================================
+def _tab_printables():
+    """
+    Everything the coach touches BEFORE a practice or meet:
+      - Meet Sheets: create new meet + print, or reprint an existing one
+      - Workout Sheets: configure and print a blank workout clipboard sheet
+      - Attendance Sheets: blank weekly sign-in grids
+    """
+    st.subheader("📋 Printables")
+    st.markdown("Generate sheets to bring to practice or a meet. Data entry happens in the **✏️ Data Entry** tab after the event.")
+    action = st.radio(
+        "What do you need?",
+        ["Meet Sheet — Create New", "Meet Sheet — Reprint Existing", "Workout Sheet", "Attendance Sheet"],
+        horizontal=True
+    )
+    st.markdown("---")
+
+    if action == "Meet Sheet — Create New":
+        _printable_new_meet()
+    elif action == "Meet Sheet — Reprint Existing":
+        _printable_reprint_meet()
+    elif action == "Workout Sheet":
+        _printable_workout_sheet()
+    elif action == "Attendance Sheet":
+        _printable_attendance()
+
+
+def _printable_new_meet():
+    """
+    Coach fills in meet name, date, and assigns runners to each race.
+    On submit: saves the pending roster to the Races sheet (blank times)
+    and generates a downloadable HTML split sheet.
+    """
+    st.markdown("### Create New Meet & Print Split Sheet")
+    st.markdown("Assign runners to each race below. This saves the meet to the database so you can enter times in **✏️ Data Entry** after the meet.")
+
+    c_m1, c_m2 = st.columns(2)
+    with c_m1: p_meet = st.text_input("Meet Name", placeholder="e.g. Asics Invitational", autocomplete="off")
+    with c_m2: p_date = st.date_input("Meet Date")
+    st.markdown("---")
+    race_count = st.number_input("How many separate races?", min_value=1, max_value=10, value=2)
+
+    active_athletes = roster_data[(roster_data["Role"].str.upper() == "ATHLETE") &
+                                   (roster_data["Active_Clean"].isin(ACTIVE_FLAGS))].copy()
+    assigned_runners = set()
+    for j in range(race_count):
+        assigned_runners.update(st.session_state.get(f"rrunners_{j}", []))
+
+    races_to_print = []
+    for i in range(race_count):
+        st.markdown(f"**Race {i+1}**")
+        r_col1, r_col2, r_col3 = st.columns([2, 1, 1])
+        with r_col1: r_name = st.text_input("Race Title", placeholder="e.g. Boys Varsity", key=f"rname_{i}", autocomplete="off")
+        with r_col2: r_dist = st.selectbox("Distance", ["5K", "2 Mile", "Other"], key=f"rdist_{i}")
+        with r_col3: r_filter = st.selectbox("Filter Runners", ["All", "Boys", "Girls"], key=f"rfilt_{i}")
+        avail = active_athletes.copy()
+        if r_filter == "Boys": avail = avail[avail["Gender"].str.title() == "Male"]
+        elif r_filter == "Girls": avail = avail[avail["Gender"].str.title() == "Female"]
+        other = assigned_runners - set(st.session_state.get(f"rrunners_{i}", []))
+        avail = avail[~avail["Username"].isin(other)]
+        opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}"
+                for _, row in avail.sort_values("Last_Name").iterrows()}
+        r_runners = st.multiselect("Select Runners", options=list(opts.keys()),
+                                   format_func=lambda x: opts[x], key=f"rrunners_{i}")
+        if r_name and r_runners:
+            races_to_print.append({"name": r_name, "dist": r_dist, "runners": r_runners})
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    if st.button("💾 Save Meet & Generate Sheet", type="primary"):
+        if not p_meet:
+            st.error("Please enter a Meet Name.")
+        elif not races_to_print:
+            st.warning("Please configure at least one race with runners.")
+        else:
+            formatted_date = pd.to_datetime(p_date).strftime("%Y-%m-%d")
+            season = calculate_season(formatted_date)
+            new_rows = [
+                {"Date": formatted_date, "Meet_Name": p_meet, "Race_Name": race["name"],
+                 "Distance": race["dist"], "Username": uname, "Mile_1": "", "Mile_2": "",
+                 "Total_Time": "", "Weight": 1.0, "Active": "TRUE", "Season": season}
+                for race in races_to_print for uname in race["runners"]
+                if races_data[(races_data["Meet_Name"] == p_meet) &
+                              (races_data["Race_Name"] == race["name"]) &
+                              (races_data["Username"] == uname)].empty
+            ]
+            if new_rows:
+                updated = pd.concat([races_data, pd.DataFrame(new_rows)], ignore_index=True)
+                with st.spinner("Saving meet to database..."):
+                    conn.update(worksheet="Races", data=updated)
                 st.cache_data.clear()
-                st.rerun()
-            except Exception:
-                st.error("Missing Tab: Open your Google Sheet, click the '+' at the bottom to add a new tab, name it exactly **Documents**, and try saving again.")
-        st.markdown("---")
-        display_team_resources()
+            html_body = _build_split_sheet_html(p_meet, races_data, roster_data,
+                                                 races_to_print, meet_date=p_date)
+            final_html = wrap_html_for_print(f"{p_meet} Split Sheet", html_body)
+            st.success(f"✅ '{p_meet}' saved! Download your sheet below, then enter times in **✏️ Data Entry** after the meet.")
+            st.download_button(
+                label="⬇️ Download Split Sheet (HTML)",
+                data=final_html,
+                file_name=f"{p_meet.replace(' ', '_')}_SplitSheet.html",
+                mime="text/html"
+            )
 
-def _tab_athlete_lookup():
-    st.subheader("Athlete Lookup")
-    col1, col2, col3 = st.columns(3)
-    filter_status = col1.selectbox("Filter by Status:", ["Active", "Archived", "All"])
-    filter_gender = col2.selectbox("Filter by Gender:", ["All", "Male", "Female"])
-    filter_grade = col3.selectbox("Filter by Grade:", ["All", "9th", "10th", "11th", "12th", "Middle School"])
 
-    base = roster_data[roster_data["Role"].str.upper() == "ATHLETE"].copy()
-    if filter_status == "Active": base = base[base["Active_Clean"].isin(ACTIVE_FLAGS)]
-    elif filter_status == "Archived": base = base[~base["Active_Clean"].isin(ACTIVE_FLAGS)]
-    base["Grade"] = base.get("Grad_Year", "Unknown").apply(get_grade_level)
-    if filter_gender != "All": base = base[base["Gender"].str.title() == filter_gender]
-    if filter_grade != "All": base = base[base["Grade"] == filter_grade]
-    base = base.sort_values(["Last_Name", "First_Name"])
-    athlete_dict = {row["Username"]: f"{row['Last_Name']}, {row['First_Name']} - {row['Grade']}" for _, row in base.iterrows()}
+def _printable_reprint_meet():
+    """Reprint the split sheet for any existing active meet."""
+    st.markdown("### Reprint Existing Meet Split Sheet")
+    active_meets = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]["Meet_Name"].dropna().unique().tolist()
+    if not active_meets:
+        st.info("No active meets found. Create one under 'Meet Sheet — Create New'.")
+        return
+    col1, _ = st.columns([1, 1])
+    with col1:
+        p_meet = st.selectbox("Select Meet", ["-- Select --"] + active_meets)
+    if p_meet != "-- Select --":
+        # Show the stored date if available
+        meet_rows = races_data[races_data["Meet_Name"] == p_meet]
+        meet_date = meet_rows["Date"].iloc[0] if not meet_rows.empty else None
+        if st.button("🖨️ Generate Print Sheet", type="primary"):
+            html_body = _build_split_sheet_html(p_meet, races_data, roster_data, meet_date=meet_date)
+            final_html = wrap_html_for_print(f"{p_meet} Split Sheet", html_body)
+            st.success("Sheet ready!")
+            st.download_button(
+                label="⬇️ Download Split Sheet (HTML)",
+                data=final_html,
+                file_name=f"{p_meet.replace(' ', '_')}_SplitSheet.html",
+                mime="text/html"
+            )
 
-    if not athlete_dict:
-        st.info("No athletes match this filter.")
+
+def _printable_workout_sheet():
+    """
+    Generate a blank printable workout clipboard sheet.
+    Boys and Girls print as separate pages within the same downloaded file.
+    Auto-switches to landscape when rep count > 7.
+    Includes the relevant rest cycle table at the bottom of each page.
+    This does NOT save anything to the database — it is a print-only tool.
+    Data entry happens in ✏️ Data Entry → Workouts after practice.
+    """
+    st.markdown("### Print Blank Workout Sheet")
+    st.info("This generates a print-ready sheet to bring to practice. Enter actual splits afterward in **✏️ Data Entry → Workouts**.")
+
+    w_col1, w_col2, w_col3 = st.columns(3)
+    with w_col1:
+        w_date  = st.date_input("Workout Date", key="ws_date")
+        w_type  = st.selectbox("Workout Type", ["Intervals", "Tempo", "Hills", "Other"], key="ws_type")
+    with w_col2:
+        dist_opts_map = {
+            "Intervals": ["400m", "800m", "1000m", "1200m", "1 Mile", "Custom"],
+            "Tempo":     ["400m", "Miles", "Split", "Custom"],
+            "Hills":     ["400m", "800m", "Short Sprints", "Custom"],
+            "Other":     ["Custom"],
+        }
+        dist_options = dist_opts_map.get(w_type, ["Custom"])
+        sel_dist = st.selectbox("Rep Distance", dist_options, key="ws_dist")
+        if sel_dist == "Custom":
+            w_dist = st.text_input("Specify distance/details", placeholder="e.g. 2+1 mile", autocomplete="off", key="ws_custom_dist")
+        else:
+            w_dist = sel_dist
+        rep_count = st.number_input("Number of Rep Columns", min_value=1, max_value=20, value=5, key="ws_reps")
+    with w_col3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if rep_count > 7:
+            st.info(f"📄 **{rep_count} reps** → sheet will print in **landscape** automatically.")
+        else:
+            st.info(f"📄 **{rep_count} reps** → sheet will print in **portrait**.")
+
+    if st.button("🖨️ Generate Workout Sheet", type="primary"):
+        if not w_dist:
+            st.error("Please specify the rep distance/details.")
+            return
+        html_body, force_landscape = _build_workout_sheet_html(
+            w_type, w_dist, w_date, rep_count,
+            roster_data, races_data, rest_data
+        )
+        final_html = wrap_html_for_print(
+            f"Workout Sheet — {w_type} {w_dist}",
+            html_body,
+            force_landscape=force_landscape
+        )
+        orient = "landscape" if force_landscape else "portrait"
+        st.success(f"✅ Workout sheet ready! ({orient} — Boys and Girls on separate pages)")
+        st.download_button(
+            label="⬇️ Download Workout Sheet (HTML)",
+            data=final_html,
+            file_name=f"Workout_{w_type}_{w_dist.replace(' ','_')}.html",
+            mime="text/html"
+        )
+
+
+def _printable_attendance():
+    """Blank weekly attendance sign-in sheet."""
+    st.markdown("### Print Attendance Sheet")
+    col_a1, col_a2, col_a3 = st.columns(3)
+    p_gender = col_a1.selectbox("Team", ["Boys", "Girls"], key="att_gender")
+    p_type   = col_a2.selectbox("Season Type", ["Summer", "School Year"], key="att_type")
+    p_week   = col_a3.text_input("Week Of (e.g., Aug 12–16)", key="att_week")
+
+    if st.button("🖨️ Generate Attendance Sheet", type="primary"):
+        target_gender = "Male" if p_gender == "Boys" else "Female"
+        athletes = roster_data[
+            (roster_data["Role"].str.upper() == "ATHLETE") &
+            (roster_data["Active_Clean"].isin(ACTIVE_FLAGS)) &
+            (roster_data["Gender"].str.title() == target_gender)
+        ].sort_values("Last_Name")
+
+        if p_type == "Summer":
+            cols_data = [("Mon In",True),("Mon Out",True),("Tues In",False),("Tues Out",False),
+                         ("Thur In",True),("Thur Out",True)]
+        else:
+            cols_data = [("Mon In",True),("Mon Out",True),("Tues In",False),("Tues Out",False),
+                         ("Wed In",True),("Wed Out",True),("Thurs In",False),("Thurs Out",False),
+                         ("Fri In",True),("Fri Out",True)]
+
+        html  = f'<div class="sheet-header"><h1>{p_gender.upper()} — {p_type.upper()} ATTENDANCE</h1>'
+        if p_week: html += f'<p class="sub">Week of: {p_week}</p>'
+        html += '</div>'
+        html += "<table style='table-layout:fixed;'><tr><th style='width:28%;text-align:left;padding-left:10px;'>Runner</th>"
+        for c_text, shaded in cols_data:
+            bg = "#e2e8f0" if shaded else "#ffffff"
+            html += f"<th style='background:{bg} !important;'>{c_text}</th>"
+        html += "</tr>"
+        for _, row in athletes.iterrows():
+            html += f"<tr><td style='text-align:left;padding-left:10px;'>{row['Last_Name']}, {row['First_Name']}</td>"
+            for _, shaded in cols_data:
+                bg = "#f1f5f9" if shaded else "#ffffff"
+                html += f"<td style='background:{bg} !important;'></td>"
+            html += "</tr>"
+        html += "</table>"
+
+        final_html = wrap_html_for_print(f"{p_gender} Attendance", html, is_attendance=True)
+        st.success("Sheet ready!")
+        st.download_button(
+            label="⬇️ Download Attendance Sheet (HTML)",
+            data=final_html,
+            file_name=f"{p_gender}_Attendance.html",
+            mime="text/html"
+        )
+
+
+# ==========================================
+# COACH TAB: DATA ENTRY
+# ==========================================
+def _tab_data_entry():
+    """
+    Everything the coach touches AFTER a practice or meet:
+      - Race Results: enter/edit finish times for any existing meet
+      - Workouts: log splits from a completed practice, or edit/delete
+    """
+    st.subheader("✏️ Data Entry")
+    st.markdown("Enter results after the event. To create a new meet or print a workout sheet, use the **📋 Printables** tab.")
+    de_type = st.radio("Entry Type:", ["Race Results", "Workouts"], horizontal=True)
+    st.markdown("---")
+
+    if de_type == "Race Results":
+        _de_race_results()
+    elif de_type == "Workouts":
+        _de_workouts()
+
+
+def _de_race_results():
+    """Enter or edit race times for an existing meet."""
+    st.subheader("Race Results Entry")
+    st.markdown("Select the meet and race, then type in finish times.")
+    active_races = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]
+    existing_meets = active_races["Meet_Name"].dropna().unique().tolist()
+
+    col_m1, col_m2 = st.columns(2)
+    with col_m1: sel_meet = st.selectbox("1. Choose Meet", ["-- Select --"] + existing_meets)
+    with col_m2:
+        if sel_meet != "-- Select --":
+            meet_races = active_races[active_races["Meet_Name"] == sel_meet]["Race_Name"].dropna().unique().tolist()
+            sel_race = st.selectbox("2. Choose Race", ["-- Select --"] + meet_races)
+        else:
+            sel_race = "-- Select --"
+
+    if sel_meet == "-- Select --" or sel_race == "-- Select --":
         return
 
-    col_sel1, _ = st.columns([1, 2])
-    with col_sel1:
-        selected_username = st.selectbox("Select an Athlete:", options=list(athlete_dict.keys()), format_func=lambda x: athlete_dict[x])
+    st.markdown("---")
+    target_rows = active_races[(active_races["Meet_Name"] == sel_meet) &
+                               (active_races["Race_Name"] == sel_race)].copy()
+    all_athletes = roster_data[(roster_data["Role"].str.upper() == "ATHLETE") &
+                               (roster_data["Active_Clean"].isin(ACTIVE_FLAGS))]
+    unassigned = all_athletes[~all_athletes["Username"].isin(target_rows["Username"])]
+    un_opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}"
+               for _, row in unassigned.sort_values("Last_Name").iterrows()}
 
-    if selected_username:
+    if un_opts:
+        with st.expander("➕ Add Walk-On / Missing Runner to this Race"):
+            add_runners = st.multiselect("Select runners to add:",
+                                         options=list(un_opts.keys()),
+                                         format_func=lambda x: un_opts[x])
+            if st.button("Add to Race Roster"):
+                date_val = target_rows["Date"].iloc[0] if not target_rows.empty else pd.to_datetime("today").strftime("%Y-%m-%d")
+                dist_val = target_rows["Distance"].iloc[0] if not target_rows.empty else "5K"
+                new_r = [{"Date": date_val, "Meet_Name": sel_meet, "Race_Name": sel_race,
+                           "Distance": dist_val, "Username": u, "Mile_1": "", "Mile_2": "",
+                           "Total_Time": "", "Weight": 1.0, "Active": "TRUE",
+                           "Season": calculate_season(date_val)} for u in add_runners]
+                updated = pd.concat([races_data, pd.DataFrame(new_r)], ignore_index=True)
+                with st.spinner("Adding runners..."): conn.update(worksheet="Races", data=updated)
+                st.cache_data.clear(); st.rerun()
+
+    st.markdown(f"### {sel_race} — Enter Times")
+    grid_data = []
+    for _, r in target_rows.iterrows():
+        match = roster_data[roster_data["Username"] == r["Username"]]
+        a_name = f"{match.iloc[0]['First_Name']} {match.iloc[0]['Last_Name']}" if not match.empty else r["Username"]
+        grid_data.append({"Username": r["Username"], "Athlete Name": a_name,
+                           "Mile 1": r.get("Mile_1",""), "Mile 2": r.get("Mile_2",""),
+                           "Total Time": r.get("Total_Time","")})
+
+    col_config = {
+        "Username": None,
+        "Athlete Name": st.column_config.TextColumn("Athlete Name", disabled=True),
+        "Mile 1":   st.column_config.TextColumn("Mile 1 Split"),
+        "Mile 2":   st.column_config.TextColumn("Mile 2 Split"),
+        "Total Time": st.column_config.TextColumn("Total Finish Time"),
+    }
+    st.caption("Type times as-is (e.g. 18:45). Blank rows are ignored in rankings.")
+    edited_df = st.data_editor(pd.DataFrame(grid_data), hide_index=True,
+                                column_config=col_config, use_container_width=True,
+                                key="race_results_editor")
+
+    col_save, col_del = st.columns(2)
+    with col_save:
+        if st.button("💾 Save All Race Results", type="primary", use_container_width=True):
+            for _, row in edited_df.iterrows():
+                mask = ((races_data["Meet_Name"] == sel_meet) &
+                        (races_data["Race_Name"] == sel_race) &
+                        (races_data["Username"] == row["Username"]))
+                races_data.loc[mask, "Mile_1"]     = str(row["Mile 1"]).strip()   if pd.notna(row["Mile 1"])    else ""
+                races_data.loc[mask, "Mile_2"]     = str(row["Mile 2"]).strip()   if pd.notna(row["Mile 2"])    else ""
+                races_data.loc[mask, "Total_Time"] = str(row["Total Time"]).strip() if pd.notna(row["Total Time"]) else ""
+            with st.spinner("Saving..."): conn.update(worksheet="Races", data=races_data)
+            st.success("✅ Results saved!"); st.cache_data.clear(); st.rerun()
+    with col_del:
+        if st.button("🗑️ Delete Entire Race", use_container_width=True):
+            keep = races_data[~((races_data["Meet_Name"] == sel_meet) &
+                                (races_data["Race_Name"] == sel_race))]
+            with st.spinner("Deleting..."): conn.update(worksheet="Races", data=keep)
+            st.success("Race deleted."); st.cache_data.clear(); st.rerun()
+
+
+def _de_workouts():
+    """Log new workout splits or edit/delete an existing workout session."""
+    workout_action = st.radio("Action:", ["Log New Workout", "Edit / Delete Existing"], horizontal=True)
+
+    if workout_action == "Log New Workout":
+        if st.session_state["workout_saved"]:
+            st.success("✅ Workout saved to the database!")
+            if st.button("Log Another Workout"):
+                st.session_state["workout_saved"] = False; st.rerun()
+            return
+
+        st.subheader("Log Workout Splits")
+        st.markdown("Enter the splits from today's practice. **Tip:** use the workout sheet you printed beforehand to transfer times quickly.")
+
+        w_col1, w_col2, w_col3 = st.columns(3)
+        with w_col1:
+            w_date = st.date_input("Workout Date", key="de_w_date")
+            w_type = st.selectbox("Workout Type", ["Tempo","Intervals","Hills","Other"], key="de_w_type")
+        with w_col2:
+            dist_opts_map = {
+                "Tempo":     ["400m","Miles","Split","Other"],
+                "Intervals": ["400m","800m","1000m","1200m","1 Mile","Custom/Other"],
+                "Hills":     ["400m","800m","Short Sprints","Custom/Other"],
+            }
+            dist_options  = dist_opts_map.get(w_type, ["Custom/Other"])
+            selected_dist = st.selectbox("Distance/Rep Details", dist_options, key="de_w_dist_sel")
+            if selected_dist in ["Custom/Other","Other","Split"]:
+                w_dist = st.text_input("Specify Details", placeholder="e.g. 2+1, 8x400m", autocomplete="off", key="de_w_dist_txt")
+            else:
+                w_dist = selected_dist
+            w_reps = st.number_input("Max Reps/Segments", min_value=1, max_value=20, value=6, key="de_w_reps")
+        with w_col3:
+            calc_mode  = st.radio("Time Entry Mode:", ["Individual Splits","Continuous Clock (Elapsed)"], key="de_w_calcmode")
+            restart_rep = 0
+            if calc_mode == "Continuous Clock (Elapsed)" and selected_dist == "Split":
+                restart_rep = st.number_input("Restart clock at Rep #", min_value=0, max_value=20, value=0,
+                                               help="e.g. for a 2+1 set this to 3", key="de_w_restart")
+
         st.markdown("---")
-        target = base[base["Username"] == selected_username].iloc[0]
-        st.markdown(f"### {target['First_Name']} {target['Last_Name']} ({target['Grade']})")
-        u_races = races_data[races_data["Username"] == selected_username]
-        u_works = workouts_data[workouts_data["Username"] == selected_username]
-        athlete_seasons = sorted(set(u_races["Season"].tolist() + u_works["Season"].tolist()), reverse=True) or [CURRENT_SEASON]
-        col_s1, _ = st.columns([1, 3])
-        with col_s1: sel_season = st.selectbox("View Season:", athlete_seasons, key="coach_athlete_season")
-        sub1, sub2, sub3, sub4 = st.tabs(["Race Results", "Workouts", "Training Paces", "Career PRs"])
-        with sub1: display_athlete_races(selected_username, sel_season)
-        with sub2: display_athlete_workouts(selected_username, sel_season)
-        with sub3: display_suggested_paces(selected_username)
-        with sub4: display_career_history(selected_username)
+        st.markdown("**Number-Only Entry Format**")
+        time_entry_format = st.radio(
+            "How to read numbers typed without a colon?",
+            ["Mins/Secs (e.g. 104 = 1:04)", "Total Seconds (e.g. 82 = 1:22)"],
+            horizontal=True, key="de_w_fmt"
+        )
+        st.caption("Leave blank to skip. Select 'Not Assigned' to record intentional exclusion.")
 
-def _tab_roster_management():
-    st.subheader("Roster Management")
-    roster_action = st.radio("Choose an action:", ["View Current Roster", "Add New Member", "Edit Member", "Archive / Restore"], horizontal=True)
-    st.markdown("---")
+        active_athletes = roster_data[
+            (roster_data["Role"].str.upper() == "ATHLETE") &
+            (roster_data["Active_Clean"].isin(ACTIVE_FLAGS))
+        ].copy().sort_values(["Gender","Last_Name"])
 
-    if roster_action == "View Current Roster":
-        active_roster = roster_data[roster_data["Active_Clean"].isin(ACTIVE_FLAGS)].copy()
-        if "Grad_Year" in active_roster.columns:
-            active_roster["Grade"] = active_roster["Grad_Year"].apply(get_grade_level)
-            display_roster = active_roster[["First_Name", "Last_Name", "Gender", "Grade", "Grad_Year", "Role"]].copy()
-            display_roster["Sort_Year"] = pd.to_numeric(display_roster["Grad_Year"], errors="coerce").fillna(9999)
-            display_roster = display_roster.sort_values(["Role", "Sort_Year", "Gender", "Last_Name"]).drop(columns=["Sort_Year"])
-            st.dataframe(display_roster, hide_index=True, use_container_width=True)
-        else:
-            st.dataframe(active_roster[["First_Name", "Last_Name", "Role"]].sort_values("Last_Name"), hide_index=True)
+        grid_data = [{"Username": row["Username"],
+                      "Athlete Name": f"{row['First_Name']} {row['Last_Name']}",
+                      "Status": "Present",
+                      **{f"Rep {i}": "" for i in range(1, w_reps+1)}}
+                     for _, row in active_athletes.iterrows()]
 
-    elif roster_action == "Add New Member":
-        with st.form("add_member_form"):
-            r1, r2 = st.columns(2)
-            new_first = r1.text_input("First Name", autocomplete="off")
-            new_last = r2.text_input("Last Name", autocomplete="off")
-            r3, r4 = st.columns(2)
-            new_role = r3.selectbox("Role", ["Athlete", "Coach"])
-            new_grad_year = r4.text_input("Grad Year (e.g., 2028)", autocomplete="off")
-            r5, _ = st.columns(2)
-            new_gender = r5.selectbox("Gender", ["Male", "Female", "N/A"])
-            if st.form_submit_button("Add to Roster"):
-                if not new_first or not new_last:
-                    st.error("First and Last name are required.")
-                else:
-                    if new_role == "Coach":
-                        final_grad_year, final_gender = "Coach", "N/A"
+        col_config = {
+            "Username": None,
+            "Athlete Name": st.column_config.TextColumn("Athlete Name", disabled=True),
+            "Status": st.column_config.SelectboxColumn(
+                "Status", options=["Present","Not Assigned","Sick","Injured","Unexcused"], required=True),
+        }
+        for i in range(1, w_reps+1):
+            col_config[f"Rep {i}"] = st.column_config.TextColumn(f"Rep {i}")
+
+        edited_df = st.data_editor(pd.DataFrame(grid_data), hide_index=True,
+                                    column_config=col_config, use_container_width=True,
+                                    key="new_workout_editor")
+
+        if st.button("💾 Save Workout Data", type="primary"):
+            if not w_dist:
+                st.error("Please enter Distance/Rep Details before saving.")
+                return
+            formatted_date = pd.to_datetime(w_date).strftime("%Y-%m-%d")
+            w_weather = get_weather_for_date(formatted_date)
+            season    = calculate_season(formatted_date)
+            new_rows  = []
+            for _, row in edited_df.iterrows():
+                status    = row["Status"]
+                raw_times = [str(row[f"Rep {i}"]).strip() for i in range(1, w_reps+1)
+                             if str(row[f"Rep {i}"]).strip()]
+                if status != "Present" and not raw_times:
+                    new_rows.append({"Date": formatted_date, "Workout_Type": w_type,
+                                     "Rep_Distance": w_dist, "Weather": w_weather,
+                                     "Username": row["Username"], "Status": status,
+                                     "Splits": "", "Season": season})
+                    continue
+                if raw_times:
+                    parsed = [time_to_seconds(parse_fast_time(t, time_entry_format)) for t in raw_times]
+                    if calc_mode == "Continuous Clock (Elapsed)":
+                        splits = [seconds_to_time(parsed[i])
+                                  if i == 0 or (restart_rep > 0 and (i+1) == restart_rep)
+                                  else seconds_to_time(parsed[i] - parsed[i-1])
+                                  for i in range(len(parsed))]
                     else:
-                        final_grad_year, final_gender = new_grad_year.strip(), new_gender
-                        if not final_grad_year.isdigit() or len(final_grad_year) != 4:
-                            st.error("Data Error: Graduation Year must be a 4-digit number.")
-                            st.stop()
-                    base_un = f"{new_first.lower()}.{new_last.lower()}".replace(" ", "")
-                    gen_un, suffix = base_un, 1
-                    while gen_un in roster_data["Username"].tolist():
-                        gen_un = f"{base_un}{suffix}"; suffix += 1
-                    new_row = pd.DataFrame([{"Username": gen_un, "Password": "changeme", "First_Name": new_first, "Last_Name": new_last,
-                                             "Role": new_role, "First_Login": "TRUE", "Active": "TRUE", "Grad_Year": final_grad_year, "Gender": final_gender}])
-                    push = roster_data.drop(columns=["Active_Clean"]) if "Active_Clean" in roster_data.columns else roster_data
-                    updated = pd.concat([push, new_row], ignore_index=True)
-                    with st.spinner("Adding new member..."): conn.update(worksheet="Roster", data=updated)
-                    st.success(f"Added {new_first} {new_last}! Username: '{gen_un}'.")
-                    st.cache_data.clear(); st.rerun()
+                        splits = [seconds_to_time(s) for s in parsed]
+                    new_rows.append({"Date": formatted_date, "Workout_Type": w_type,
+                                     "Rep_Distance": w_dist, "Weather": w_weather,
+                                     "Username": row["Username"], "Status": status,
+                                     "Splits": ", ".join(s for s in splits if s),
+                                     "Season": season})
+            if new_rows:
+                updated = pd.concat([workouts_data, pd.DataFrame(new_rows)], ignore_index=True)
+                with st.spinner("Saving..."): conn.update(worksheet="Workouts", data=updated)
+                st.session_state["workout_saved"] = True; st.cache_data.clear(); st.rerun()
 
-    elif roster_action == "Edit Member":
-        st.info("Note: You cannot edit Usernames.")
-        active = roster_data[roster_data["Active_Clean"].isin(ACTIVE_FLAGS)]
-        edit_dict = {row["Username"]: f"{row['First_Name']} {row['Last_Name']} ({row.get('Role', '')})" for _, row in active.iterrows()}
-        if not edit_dict:
-            st.info("No active members to edit.")
-        else:
-            col_e1, _ = st.columns([1, 1])
-            with col_e1: user_to_edit = st.selectbox("Select Member to Edit:", options=list(edit_dict.keys()), format_func=lambda x: edit_dict[x])
-            if user_to_edit:
-                target_row = roster_data[roster_data["Username"] == user_to_edit].iloc[0]
-                with st.form("edit_member_form"):
-                    e1, e2 = st.columns(2)
-                    edit_first = e1.text_input("First Name", value=target_row["First_Name"], autocomplete="off")
-                    edit_last = e2.text_input("Last Name", value=target_row["Last_Name"], autocomplete="off")
-                    e3, e4 = st.columns(2)
-                    role_index = 0 if str(target_row["Role"]).title() == "Athlete" else 1
-                    edit_role = e3.selectbox("Role", ["Athlete", "Coach"], index=role_index)
-                    edit_grad_year = e4.text_input("Grad Year", value=str(target_row.get("Grad_Year", "")), autocomplete="off")
-                    e5, _ = st.columns(2)
-                    gender_val = str(target_row.get("Gender", "N/A")).title()
-                    gender_opts = ["Male", "Female", "N/A"]
-                    g_index = gender_opts.index(gender_val) if gender_val in gender_opts else 2
-                    edit_gender = e5.selectbox("Gender", gender_opts, index=g_index)
-                    if st.form_submit_button("Save Changes"):
-                        if edit_role != "Coach" and (not edit_grad_year.strip().isdigit() or len(edit_grad_year.strip()) != 4):
-                            st.error("Data Error: Graduation Year must be a 4-digit number.")
-                            st.stop()
-                        idx = roster_data.index[roster_data["Username"] == user_to_edit].tolist()[0]
-                        roster_data.at[idx, "First_Name"] = edit_first
-                        roster_data.at[idx, "Last_Name"] = edit_last
-                        roster_data.at[idx, "Role"] = edit_role
-                        roster_data.at[idx, "Grad_Year"] = "Coach" if edit_role == "Coach" else edit_grad_year.strip()
-                        roster_data.at[idx, "Gender"] = "N/A" if edit_role == "Coach" else edit_gender
-                        with st.spinner("Saving changes..."): save_to_sheet("Roster", roster_data)
-                        st.success("Member updated successfully!"); st.rerun()
+    elif workout_action == "Edit / Delete Existing":
+        st.subheader("Edit / Delete Existing Workout")
+        if workouts_data.empty or workouts_data["Date"].isna().all():
+            st.info("No workout data has been logged yet.")
+            return
 
-    elif roster_action == "Archive / Restore":
-        arc_tab1, arc_tab2, arc_tab3 = st.tabs(["Archive Individual", "Restore Member", "Graduate Seniors"])
-        with arc_tab1:
-            active = roster_data[roster_data["Active_Clean"].isin(ACTIVE_FLAGS)]
-            arc_dict = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}" for _, row in active.iterrows()}
-            if not arc_dict:
-                st.info("No active members to archive.")
-            else:
-                c_a1, _ = st.columns([1, 2])
-                with c_a1: user_to_archive = st.selectbox("Select Member to Archive:", options=list(arc_dict.keys()), format_func=lambda x: arc_dict[x])
-                if st.button("Archive Member"):
-                    idx = roster_data.index[roster_data["Username"] == user_to_archive].tolist()[0]
-                    roster_data.at[idx, "Active"] = "FALSE"
-                    save_to_sheet("Roster", roster_data); st.rerun()
+        unique_w = (workouts_data[["Date","Workout_Type","Rep_Distance"]]
+                    .dropna(subset=["Date","Workout_Type"]).drop_duplicates())
+        unique_w["Date_Obj"] = pd.to_datetime(unique_w["Date"], errors="coerce")
+        unique_w = unique_w.sort_values("Date_Obj", ascending=False)
 
-        with arc_tab2:
-            inactive = roster_data[~roster_data["Active_Clean"].isin(ACTIVE_FLAGS)]
-            restore_dict = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}" for _, row in inactive.iterrows()}
-            if not restore_dict:
-                st.info("There are no archived members to restore.")
-            else:
-                c_r1, _ = st.columns([1, 2])
-                with c_r1: user_to_restore = st.selectbox("Select Member to Restore:", options=list(restore_dict.keys()), format_func=lambda x: restore_dict[x])
-                if st.button("Restore Member"):
-                    idx = roster_data.index[roster_data["Username"] == user_to_restore].tolist()[0]
-                    roster_data.at[idx, "Active"] = "TRUE"
-                    save_to_sheet("Roster", roster_data); st.rerun()
+        w_opts = {}
+        for _, row in unique_w.iterrows():
+            key = f"{row['Date']}|{row['Workout_Type']}"
+            try: nice = row["Date_Obj"].strftime("%b %d, %Y")
+            except: nice = str(row["Date"])
+            w_opts[key] = f"{nice} — {row['Workout_Type']} [{row.get('Rep_Distance','No Details')}]"
 
-        with arc_tab3:
-            st.warning("This will archive all active runners whose Grade Level is calculated as '12th'.")
-            active_df = roster_data[roster_data["Active_Clean"].isin(ACTIVE_FLAGS)].copy()
-            active_df["Grade"] = active_df.get("Grad_Year", "Unknown").apply(get_grade_level)
-            seniors = active_df[active_df["Grade"] == "12th"]
-            if seniors.empty:
-                st.info("No active seniors found.")
-            else:
-                for _, s in seniors.iterrows(): st.markdown(f"- {s['First_Name']} {s['Last_Name']}")
-                if st.button("Confirm: Archive All Seniors"):
-                    for _, s in seniors.iterrows():
-                        idx = roster_data.index[roster_data["Username"] == s["Username"]].tolist()[0]
-                        roster_data.at[idx, "Active"] = "FALSE"
-                    with st.spinner("Archiving seniors..."): save_to_sheet("Roster", roster_data)
-                    st.rerun()
+        if not w_opts:
+            st.info("No valid workouts found.")
+            return
 
-def _tab_data_entry():
-    de_type = st.radio("Select Entry Mode", ["Race Results", "Workouts", "Manage Meet Weights", "Manage Pacing & Rest", "Archive Specific Meet"], horizontal=True)
+        col1, _ = st.columns([1,1])
+        with col1:
+            sel_key = st.selectbox("Select Workout:", options=list(w_opts.keys()),
+                                    format_func=lambda x: w_opts[x])
+        old_date, old_type = sel_key.split("|")
+        target_rows = workouts_data[(workouts_data["Date"] == old_date) &
+                                     (workouts_data["Workout_Type"] == old_type)].copy()
+        if target_rows.empty:
+            st.info("No data found for that workout.")
+            return
+
+        st.markdown("### Update Workout Header")
+        cur_date    = pd.to_datetime(target_rows.iloc[0]["Date"], errors="coerce").date()
+        cur_type    = target_rows.iloc[0]["Workout_Type"]
+        cur_dist    = target_rows.iloc[0]["Rep_Distance"]
+        cur_weather = target_rows.iloc[0]["Weather"]
+        type_opts   = ["Tempo","Intervals","Hills","Other"]
+
+        h1, h2 = st.columns(2)
+        with h1:
+            new_date = st.date_input("Workout Date", value=cur_date, key="edit_w_date")
+            new_type = st.selectbox("Workout Type", type_opts,
+                                     index=type_opts.index(cur_type) if cur_type in type_opts else 3,
+                                     key="edit_w_type")
+            st.markdown(f"**Current Weather:** {cur_weather}")
+        with h2:
+            new_dist = st.text_input("Distance/Rep Details", value=cur_dist, autocomplete="off", key="edit_w_dist")
+
+        st.markdown("### Update Athlete Splits")
+        max_reps = max(
+            (len([s.strip() for s in str(r.get("Splits","")).split(",") if s.strip()])
+             for _, r in target_rows.iterrows()),
+            default=1
+        )
+        grid_data = []
+        for _, r in target_rows.iterrows():
+            match  = roster_data[roster_data["Username"] == r["Username"]]
+            a_name = f"{match.iloc[0]['First_Name']} {match.iloc[0]['Last_Name']}" if not match.empty else r["Username"]
+            splits = [s.strip() for s in str(r.get("Splits","")).split(",") if s.strip()]
+            grid_data.append({"Username": r["Username"], "Athlete Name": a_name,
+                               "Status": r["Status"],
+                               **{f"Rep {i}": splits[i-1] if i <= len(splits) else ""
+                                  for i in range(1, max_reps+1)}})
+
+        col_config = {
+            "Username": None,
+            "Athlete Name": st.column_config.TextColumn("Athlete Name", disabled=True),
+            "Status": st.column_config.SelectboxColumn(
+                "Status", options=["Present","Not Assigned","Sick","Injured","Unexcused"], required=True),
+        }
+        for i in range(1, max_reps+1):
+            col_config[f"Rep {i}"] = st.column_config.TextColumn(f"Rep {i}")
+        st.caption("Edit splits directly. Type the corrected time (e.g. 1:04).")
+        edited_df = st.data_editor(pd.DataFrame(grid_data), hide_index=True,
+                                    column_config=col_config, use_container_width=True,
+                                    key="edit_workout_editor")
+
+        col_save, col_del = st.columns(2)
+        with col_save:
+            if st.button("💾 Save All Edits", type="primary", use_container_width=True):
+                keep = workouts_data[~((workouts_data["Date"] == old_date) &
+                                       (workouts_data["Workout_Type"] == old_type))]
+                fmt_date = pd.to_datetime(new_date).strftime("%Y-%m-%d")
+                final_weather = (get_weather_for_date(fmt_date)
+                                 if fmt_date != old_date or not cur_weather or "Can't" in cur_weather
+                                 else cur_weather)
+                new_rows = [{"Date": fmt_date, "Workout_Type": new_type, "Rep_Distance": new_dist,
+                              "Weather": final_weather, "Username": row["Username"], "Status": row["Status"],
+                              "Splits": ", ".join(str(row[f"Rep {i}"]).strip()
+                                                   for i in range(1, max_reps+1)
+                                                   if str(row[f"Rep {i}"]).strip()),
+                              "Season": calculate_season(fmt_date)}
+                             for _, row in edited_df.iterrows()]
+                updated = pd.concat([keep, pd.DataFrame(new_rows)], ignore_index=True)
+                with st.spinner("Updating..."): conn.update(worksheet="Workouts", data=updated)
+                st.success("✅ Workout updated!"); st.cache_data.clear(); st.rerun()
+        with col_del:
+            if st.button("🗑️ Delete This Workout", use_container_width=True):
+                keep = workouts_data[~((workouts_data["Date"] == old_date) &
+                                       (workouts_data["Workout_Type"] == old_type))]
+                with st.spinner("Deleting..."): conn.update(worksheet="Workouts", data=keep)
+                st.success("Workout deleted!"); st.cache_data.clear(); st.rerun()
+
+
+# ==========================================
+# COACH TAB: MANAGE (infrequent admin)
+# ==========================================
+def _tab_manage():
+    """
+    Infrequent admin tasks:
+      - Meet Weights: adjust ranking multipliers per meet
+      - Archive Meet: hide a meet from the active dashboard
+      - Pacing & Rest: edit VDOT table and rest cycle table
+      - Team Documents: manage embedded Google Doc links
+    """
+    st.subheader("⚙️ Manage")
+    action = st.radio(
+        "Select task:",
+        ["Meet Weights", "Archive a Meet", "Pacing & Rest Tables", "Team Documents"],
+        horizontal=True
+    )
     st.markdown("---")
 
-    if de_type == "Manage Pacing & Rest":
-        st.subheader("Manage VDOT Paces & Rest Cycles")
-        st.info("These tables control the recommended paces and rest metrics automatically displayed to your athletes. You can change these targets mid-season if needed.")
-        edit_tab1, edit_tab2 = st.tabs(["VDOT Pace Chart", "Rest Cycles"])
-        with edit_tab1:
-            st.markdown("**Editable Pace Chart**")
-            edited_vdot = st.data_editor(vdot_data, num_rows="dynamic", use_container_width=True)
-            if st.button("💾 Save Pace Chart", type="primary"):
-                try:
-                    with st.spinner("Updating database..."): conn.update(worksheet="VDOT", data=edited_vdot)
-                    st.success("Pace Chart updated!"); st.cache_data.clear()
-                except Exception:
-                    st.error("Missing Tab: Open your Google Sheet, click the '+' to add a new tab, name it exactly **VDOT**, and try again.")
-        with edit_tab2:
-            st.markdown("**Editable Rest Cycles**")
-            edited_rest = st.data_editor(rest_data, num_rows="dynamic", use_container_width=True)
-            if st.button("💾 Save Rest Cycles", type="primary"):
-                try:
-                    with st.spinner("Updating database..."): conn.update(worksheet="Rest", data=edited_rest)
-                    st.success("Rest Cycles updated!"); st.cache_data.clear()
-                except Exception:
-                    st.error("Missing Tab: Open your Google Sheet, click the '+' to add a new tab, name it exactly **Rest**, and try again.")
-
-    elif de_type == "Archive Specific Meet":
-        st.subheader("Archive a Single Meet")
-        st.markdown("Hiding a meet from the active dashboard. Data remains in the database.")
-        active_meets = races_data[races_data["Active"].isin(ACTIVE_FLAGS)][["Meet_Name", "Date"]].drop_duplicates()
-        if active_meets.empty:
-            st.info("No active meets available to archive.")
-        else:
-            meet_options = {f"{row['Meet_Name']}|{row['Date']}": f"{pd.to_datetime(row['Date'], errors='coerce').strftime('%m/%d/%Y')} | {row['Meet_Name']}" for _, row in active_meets.iterrows()}
-            with st.form("archive_meet_form"):
-                col1, _ = st.columns([1, 1])
-                with col1: meet_to_archive = st.selectbox("Select Meet", options=list(meet_options.keys()), format_func=lambda x: meet_options[x])
-                if st.form_submit_button("Archive Meet"):
-                    m_name, m_date = meet_to_archive.split("|")
-                    races_data.loc[(races_data["Meet_Name"] == m_name) & (races_data["Date"] == m_date), "Active"] = "FALSE"
-                    with st.spinner("Archiving..."):
-                        conn.update(worksheet="Races", data=races_data)
-                    st.success(f"Archived {m_name}!"); st.cache_data.clear(); st.rerun()
-
-    elif de_type == "Manage Meet Weights":
-        st.subheader("Manage Meet Multipliers & Weights")
-        st.info(f"Currently managing weights for the **{CURRENT_SEASON}** season.")
-        active_races = races_data[(races_data["Active"].isin(ACTIVE_FLAGS)) & (races_data["Season"] == CURRENT_SEASON)]
-        unique_meets = active_races[["Meet_Name", "Date", "Weight"]].drop_duplicates(subset=["Meet_Name", "Date"])
+    if action == "Meet Weights":
+        st.subheader("Meet Multipliers & Weights")
+        st.info(f"Adjusting weights for the **{CURRENT_SEASON}** season. Weight 0 = excluded from rankings.")
+        active_races  = races_data[(races_data["Active"].isin(ACTIVE_FLAGS)) &
+                                    (races_data["Season"] == CURRENT_SEASON)]
+        unique_meets  = active_races[["Meet_Name","Date","Weight"]].drop_duplicates(subset=["Meet_Name","Date"])
         if unique_meets.empty or unique_meets["Meet_Name"].isna().all():
             st.info("No meets logged yet for the current season.")
         else:
             with st.form("weights_form"):
-                updated_weights = {}
-                for index, row in unique_meets.iterrows():
+                updated = {}
+                for idx, row in unique_meets.iterrows():
                     label = f"{pd.to_datetime(row['Date'], errors='coerce').strftime('%m/%d/%Y')} | {row['Meet_Name']}"
-                    updated_weights[(row["Meet_Name"], row["Date"])] = st.number_input(label, value=float(row["Weight"]), step=0.5, min_value=0.0, key=f"weight_input_{index}")
-                if st.form_submit_button("Save Weights", type="primary"):
-                    for (m, d), w in updated_weights.items():
-                        races_data.loc[(races_data["Meet_Name"] == m) & (races_data["Date"] == d), "Weight"] = w
-                    with st.spinner("Updating database..."): conn.update(worksheet="Races", data=races_data)
-                    st.success("Meet Weights updated successfully!"); st.cache_data.clear(); st.rerun()
+                    updated[(row["Meet_Name"], row["Date"])] = st.number_input(
+                        label, value=float(row["Weight"]), step=0.5, min_value=0.0,
+                        key=f"wt_{idx}")
+                if st.form_submit_button("💾 Save Weights", type="primary"):
+                    for (m, d), w in updated.items():
+                        races_data.loc[(races_data["Meet_Name"] == m) &
+                                       (races_data["Date"] == d), "Weight"] = w
+                    with st.spinner("Saving..."): conn.update(worksheet="Races", data=races_data)
+                    st.success("✅ Weights saved!"); st.cache_data.clear(); st.rerun()
 
-    elif de_type == "Race Results":
-        st.subheader("Race Data Entry")
-        st.markdown("Select an existing meet to enter times in bulk.")
-        active_races = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]
-        existing_meets = active_races["Meet_Name"].dropna().unique().tolist()
-        col_m1, col_m2 = st.columns(2)
-        with col_m1: sel_meet = st.selectbox("1. Choose Meet", ["-- Select --"] + existing_meets)
-        with col_m2:
-            if sel_meet != "-- Select --":
-                meet_races = active_races[active_races["Meet_Name"] == sel_meet]["Race_Name"].dropna().unique().tolist()
-                sel_race = st.selectbox("2. Choose Race", ["-- Select --"] + meet_races)
-            else:
-                sel_race = "-- Select --"
+    elif action == "Archive a Meet":
+        st.subheader("Archive a Meet")
+        st.markdown("Hides the meet from rankings and athlete views. Data is preserved and can be restored by editing the sheet directly.")
+        active_meets = races_data[races_data["Active"].isin(ACTIVE_FLAGS)][["Meet_Name","Date"]].drop_duplicates()
+        if active_meets.empty:
+            st.info("No active meets to archive.")
+        else:
+            meet_opts = {f"{row['Meet_Name']}|{row['Date']}":
+                         f"{pd.to_datetime(row['Date'], errors='coerce').strftime('%m/%d/%Y')} | {row['Meet_Name']}"
+                         for _, row in active_meets.iterrows()}
+            with st.form("archive_meet_form"):
+                col1, _ = st.columns([1,1])
+                with col1:
+                    to_archive = st.selectbox("Select Meet", options=list(meet_opts.keys()),
+                                               format_func=lambda x: meet_opts[x])
+                if st.form_submit_button("Archive Meet"):
+                    m_name, m_date = to_archive.split("|")
+                    races_data.loc[(races_data["Meet_Name"] == m_name) &
+                                   (races_data["Date"] == m_date), "Active"] = "FALSE"
+                    with st.spinner("Archiving..."): conn.update(worksheet="Races", data=races_data)
+                    st.success(f"✅ '{m_name}' archived."); st.cache_data.clear(); st.rerun()
 
-        if sel_meet != "-- Select --" and sel_race != "-- Select --":
-            st.markdown("---")
-            target_rows = active_races[(active_races["Meet_Name"] == sel_meet) & (active_races["Race_Name"] == sel_race)].copy()
-            all_athletes = roster_data[(roster_data["Role"].str.upper() == "ATHLETE") & (roster_data["Active_Clean"].isin(ACTIVE_FLAGS))]
-            unassigned = all_athletes[~all_athletes["Username"].isin(target_rows["Username"])]
-            un_opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}" for _, row in unassigned.sort_values("Last_Name").iterrows()}
-            if un_opts:
-                with st.expander("Add Walk-On / Missing Runners to this Race"):
-                    add_runners = st.multiselect("Select Runners:", options=list(un_opts.keys()), format_func=lambda x: un_opts[x])
-                    if st.button("Add to Race Roster"):
-                        date_val = target_rows["Date"].iloc[0] if not target_rows.empty else pd.to_datetime("today").strftime("%Y-%m-%d")
-                        dist_val = target_rows["Distance"].iloc[0] if not target_rows.empty else "5K"
-                        new_r = [{"Date": date_val, "Meet_Name": sel_meet, "Race_Name": sel_race, "Distance": dist_val, "Username": u, "Mile_1": "", "Mile_2": "", "Total_Time": "", "Weight": 1.0, "Active": "TRUE", "Season": calculate_season(date_val)} for u in add_runners]
-                        updated = pd.concat([races_data, pd.DataFrame(new_r)], ignore_index=True)
-                        with st.spinner("Adding runners..."): conn.update(worksheet="Races", data=updated)
-                        st.cache_data.clear(); st.rerun()
+    elif action == "Pacing & Rest Tables":
+        st.subheader("VDOT Paces & Rest Cycles")
+        st.info("These tables drive the personalized pace calculator shown to athletes. Edit carefully — changes take effect immediately.")
+        t1, t2 = st.tabs(["VDOT Pace Chart", "Rest Cycles"])
+        with t1:
+            edited_vdot = st.data_editor(vdot_data, num_rows="dynamic", use_container_width=True)
+            if st.button("💾 Save Pace Chart", type="primary"):
+                try:
+                    with st.spinner("Saving..."): conn.update(worksheet="VDOT", data=edited_vdot)
+                    st.success("✅ Pace chart saved!"); st.cache_data.clear()
+                except Exception:
+                    st.error("Missing tab — add a sheet named **VDOT** in your Google Sheet.")
+        with t2:
+            edited_rest = st.data_editor(rest_data, num_rows="dynamic", use_container_width=True)
+            if st.button("💾 Save Rest Cycles", type="primary"):
+                try:
+                    with st.spinner("Saving..."): conn.update(worksheet="Rest", data=edited_rest)
+                    st.success("✅ Rest cycles saved!"); st.cache_data.clear()
+                except Exception:
+                    st.error("Missing tab — add a sheet named **Rest** in your Google Sheet.")
 
-            st.markdown(f"### {sel_race} Results")
-            grid_data = []
-            for _, r in target_rows.iterrows():
-                match = roster_data[roster_data["Username"] == r["Username"]]
-                a_name = f"{match.iloc[0]['First_Name']} {match.iloc[0]['Last_Name']}" if not match.empty else r["Username"]
-                grid_data.append({"Username": r["Username"], "Athlete Name": a_name, "Mile 1": r.get("Mile_1", ""), "Mile 2": r.get("Mile_2", ""), "Total Time": r.get("Total_Time", "")})
-
-            col_config = {"Username": None, "Athlete Name": st.column_config.TextColumn("Athlete Name", disabled=True),
-                          "Mile 1": st.column_config.TextColumn("Mile 1 Split"), "Mile 2": st.column_config.TextColumn("Mile 2 Split"),
-                          "Total Time": st.column_config.TextColumn("Total Finish Time")}
-            st.caption("Type times exactly as you want them to appear (e.g., 18:45). Runners left blank will be ignored in rankings.")
-            edited_df = st.data_editor(pd.DataFrame(grid_data), hide_index=True, column_config=col_config, use_container_width=True, key="race_results_editor")
-
-            col_save, col_del = st.columns(2)
-            with col_save:
-                if st.button("💾 Save All Race Results", type="primary", use_container_width=True):
-                    for _, row in edited_df.iterrows():
-                        mask = (races_data["Meet_Name"] == sel_meet) & (races_data["Race_Name"] == sel_race) & (races_data["Username"] == row["Username"])
-                        races_data.loc[mask, "Mile_1"] = str(row["Mile 1"]).strip() if pd.notna(row["Mile 1"]) else ""
-                        races_data.loc[mask, "Mile_2"] = str(row["Mile 2"]).strip() if pd.notna(row["Mile 2"]) else ""
-                        races_data.loc[mask, "Total_Time"] = str(row["Total Time"]).strip() if pd.notna(row["Total Time"]) else ""
-                    with st.spinner("Saving results..."): conn.update(worksheet="Races", data=races_data)
-                    st.success("Results updated!"); st.cache_data.clear(); st.rerun()
-            with col_del:
-                if st.button("🗑️ Delete Entire Race", use_container_width=True):
-                    keep = races_data[~((races_data["Meet_Name"] == sel_meet) & (races_data["Race_Name"] == sel_race))]
-                    with st.spinner("Deleting..."): conn.update(worksheet="Races", data=keep)
-                    st.success("Race deleted."); st.cache_data.clear(); st.rerun()
-
-    elif de_type == "Workouts":
-        workout_action = st.radio("Action:", ["Log New Workout", "Edit/Delete Existing Workout"], horizontal=True)
-        if workout_action == "Log New Workout":
-            if st.session_state["workout_saved"]:
-                st.success("Workout saved successfully to the database!")
-                if st.button("Log Another Workout"):
-                    st.session_state["workout_saved"] = False; st.rerun()
-            else:
-                st.subheader("Workout Data Entry")
-                w_col1, w_col2, w_col3 = st.columns(3)
-                with w_col1:
-                    w_date = st.date_input("Workout Date")
-                    w_type = st.selectbox("Workout Type", ["Tempo", "Intervals", "Hills", "Other"])
-                with w_col2:
-                    dist_opts_map = {"Tempo": ["400m", "Miles", "Split", "Other"], "Intervals": ["400m", "800m", "1000m", "1200m", "1 Mile", "Custom/Other"], "Hills": ["400m", "800m", "Short Sprints", "Custom/Other"]}
-                    dist_options = dist_opts_map.get(w_type, ["Custom/Other"])
-                    selected_dist = st.selectbox("Distance/Rep Details", dist_options)
-                    if selected_dist in ["Custom/Other", "Other", "Split"]: w_dist = st.text_input("Specify Distance/Details", placeholder="e.g., 2+1, 8x400m", autocomplete="off")
-                    else: w_dist = selected_dist
-                    w_reps = st.number_input("Total Max Intervals/Segments Today", min_value=1, max_value=20, value=6)
-                with w_col3:
-                    calc_mode = st.radio("Time Entry Mode:", ["Individual Splits", "Continuous Clock (Elapsed)"], index=0)
-                    restart_rep = 0
-                    if calc_mode == "Continuous Clock (Elapsed)" and selected_dist == "Split":
-                        restart_rep = st.number_input("Restart clock at Rep # (0 = never)", min_value=0, max_value=20, value=0, help="For a 2+1 split (3 total segments), set this to 3 so the 3rd column starts from 0.")
-
-                st.markdown("---")
-                st.markdown("**Number-Only Entry Format**")
-                time_entry_format = st.radio("How should the app read numbers typed without a colon?", ["Mins/Secs (e.g., 104 = 1:04, 530 = 5:30)", "Total Seconds (e.g., 82 = 1:22, 104 = 1:44)"], horizontal=True)
-                st.caption("Leave cells blank to skip an athlete. Select 'Not Assigned' to record they were intentionally excluded.")
-
-                active_athletes = roster_data[(roster_data["Role"].str.upper() == "ATHLETE") & (roster_data["Active_Clean"].isin(ACTIVE_FLAGS))].copy().sort_values(["Gender", "Last_Name"])
-                grid_data = [{"Username": row["Username"], "Athlete Name": f"{row['First_Name']} {row['Last_Name']}", "Status": "Present", **{f"Rep {i}": "" for i in range(1, w_reps + 1)}} for _, row in active_athletes.iterrows()]
-                column_config = {"Username": None, "Athlete Name": st.column_config.TextColumn("Athlete Name", disabled=True), "Status": st.column_config.SelectboxColumn("Status", options=["Present", "Not Assigned", "Sick", "Injured", "Unexcused"], required=True)}
-                for i in range(1, w_reps + 1): column_config[f"Rep {i}"] = st.column_config.TextColumn(f"Rep {i}")
-                edited_df = st.data_editor(pd.DataFrame(grid_data), hide_index=True, column_config=column_config, use_container_width=True, key="new_workout_editor")
-
-                if st.button("Save Workout Data", type="primary"):
-                    if not w_dist:
-                        st.error("Please enter Distance/Rep Details before saving.")
-                    else:
-                        formatted_date = pd.to_datetime(w_date).strftime("%Y-%m-%d")
-                        w_weather = get_weather_for_date(formatted_date)
-                        season = calculate_season(formatted_date)
-                        new_workout_rows = []
-                        for _, row in edited_df.iterrows():
-                            status = row["Status"]
-                            raw_times = [str(row[f"Rep {i}"]).strip() for i in range(1, w_reps + 1) if str(row[f"Rep {i}"]).strip()]
-                            if status != "Present" and not raw_times:
-                                new_workout_rows.append({"Date": formatted_date, "Workout_Type": w_type, "Rep_Distance": w_dist, "Weather": w_weather, "Username": row["Username"], "Status": status, "Splits": "", "Season": season})
-                                continue
-                            if raw_times:
-                                parsed_seconds = [time_to_seconds(parse_fast_time(t, time_entry_format)) for t in raw_times]
-                                if calc_mode == "Continuous Clock (Elapsed)":
-                                    final_splits = [seconds_to_time(parsed_seconds[i]) if i == 0 or (restart_rep > 0 and (i + 1) == restart_rep) else seconds_to_time(parsed_seconds[i] - parsed_seconds[i-1]) for i in range(len(parsed_seconds))]
-                                else:
-                                    final_splits = [seconds_to_time(s) for s in parsed_seconds]
-                                split_string = ", ".join([s for s in final_splits if s])
-                                new_workout_rows.append({"Date": formatted_date, "Workout_Type": w_type, "Rep_Distance": w_dist, "Weather": w_weather, "Username": row["Username"], "Status": status, "Splits": split_string, "Season": season})
-                        if new_workout_rows:
-                            updated = pd.concat([workouts_data, pd.DataFrame(new_workout_rows)], ignore_index=True)
-                            with st.spinner("Saving workout..."): conn.update(worksheet="Workouts", data=updated)
-                            st.session_state["workout_saved"] = True; st.cache_data.clear(); st.rerun()
-
-        elif workout_action == "Edit/Delete Existing Workout":
-            st.subheader("Edit / Fix Existing Workout")
-            if workouts_data.empty or workouts_data["Date"].isna().all():
-                st.info("No workout data has been logged yet.")
-            else:
-                unique_workouts = workouts_data[["Date", "Workout_Type", "Rep_Distance"]].dropna(subset=["Date", "Workout_Type"]).drop_duplicates()
-                unique_workouts["Date_Obj"] = pd.to_datetime(unique_workouts["Date"], errors="coerce")
-                unique_workouts = unique_workouts.sort_values("Date_Obj", ascending=False)
-                workout_options = {}
-                for _, row in unique_workouts.iterrows():
-                    key = f"{row['Date']}|{row['Workout_Type']}"
-                    try: nice_date = row["Date_Obj"].strftime("%b %d, %Y")
-                    except: nice_date = str(row["Date"])
-                    workout_options[key] = f"{nice_date} - {row['Workout_Type']} [{row.get('Rep_Distance', 'No Details')}]"
-                if not workout_options:
-                    st.info("No valid workouts found to edit.")
-                else:
-                    col_w1, _ = st.columns([1, 1])
-                    with col_w1: selected_key = st.selectbox("Select Workout to Edit:", options=list(workout_options.keys()), format_func=lambda x: workout_options[x])
-                    old_date, old_type = selected_key.split("|")
-                    target_rows = workouts_data[(workouts_data["Date"] == old_date) & (workouts_data["Workout_Type"] == old_type)].copy()
-                    if not target_rows.empty:
-                        st.markdown("### Update Workout Details")
-                        current_date_val = pd.to_datetime(target_rows.iloc[0]["Date"], errors="coerce").date()
-                        current_type = target_rows.iloc[0]["Workout_Type"]
-                        current_dist = target_rows.iloc[0]["Rep_Distance"]
-                        current_weather = target_rows.iloc[0]["Weather"]
-                        type_options = ["Tempo", "Intervals", "Hills", "Other"]
-                        h1, h2 = st.columns(2)
-                        with h1:
-                            new_w_date = st.date_input("Workout Date", value=current_date_val)
-                            new_w_type = st.selectbox("Workout Type", type_options, index=type_options.index(current_type) if current_type in type_options else 3)
-                            st.markdown(f"**Current Weather:** {current_weather}")
-                        with h2:
-                            new_w_dist = st.text_input("Distance/Rep Details", value=current_dist, autocomplete="off")
-                        st.markdown("### Update Athlete Splits")
-                        max_reps = max((len([s.strip() for s in str(r.get("Splits", "")).split(",") if s.strip()]) for _, r in target_rows.iterrows()), default=1)
-                        grid_data = []
-                        for _, r in target_rows.iterrows():
-                            match = roster_data[roster_data["Username"] == r["Username"]]
-                            a_name = f"{match.iloc[0]['First_Name']} {match.iloc[0]['Last_Name']}" if not match.empty else r["Username"]
-                            splits = [s.strip() for s in str(r.get("Splits", "")).split(",") if s.strip()]
-                            entry = {"Username": r["Username"], "Athlete Name": a_name, "Status": r["Status"], **{f"Rep {i}": splits[i-1] if i <= len(splits) else "" for i in range(1, max_reps + 1)}}
-                            grid_data.append(entry)
-                        column_config = {"Username": None, "Athlete Name": st.column_config.TextColumn("Athlete Name", disabled=True),
-                                         "Status": st.column_config.SelectboxColumn("Status", options=["Present", "Not Assigned", "Sick", "Injured", "Unexcused"], required=True)}
-                        for i in range(1, max_reps + 1): column_config[f"Rep {i}"] = st.column_config.TextColumn(f"Rep {i}")
-                        st.caption("Edit the splits below. Type the exact corrected time (e.g., 1:04).")
-                        edited_df = st.data_editor(pd.DataFrame(grid_data), hide_index=True, column_config=column_config, use_container_width=True, key="edit_workout_editor")
-                        col_save, col_del = st.columns(2)
-                        with col_save:
-                            if st.button("💾 Save All Edits", type="primary", use_container_width=True):
-                                keep_rows = workouts_data[~((workouts_data["Date"] == old_date) & (workouts_data["Workout_Type"] == old_type))]
-                                formatted_new_date = pd.to_datetime(new_w_date).strftime("%Y-%m-%d")
-                                final_weather = get_weather_for_date(formatted_new_date) if formatted_new_date != old_date or not current_weather or "Can't" in current_weather else current_weather
-                                new_rows = [{"Date": formatted_new_date, "Workout_Type": new_w_type, "Rep_Distance": new_w_dist, "Weather": final_weather, "Username": row["Username"], "Status": row["Status"],
-                                             "Splits": ", ".join([str(row[f"Rep {i}"]).strip() for i in range(1, max_reps + 1) if str(row[f"Rep {i}"]).strip()]), "Season": calculate_season(formatted_new_date)} for _, row in edited_df.iterrows()]
-                                updated = pd.concat([keep_rows, pd.DataFrame(new_rows)], ignore_index=True)
-                                with st.spinner("Updating workout..."): conn.update(worksheet="Workouts", data=updated)
-                                st.success("Workout updated successfully!"); st.cache_data.clear(); st.rerun()
-                        with col_del:
-                            if st.button("🗑️ Delete This Workout Entirely", use_container_width=True):
-                                keep = workouts_data[~((workouts_data["Date"] == old_date) & (workouts_data["Workout_Type"] == old_type))]
-                                with st.spinner("Deleting workout..."): conn.update(worksheet="Workouts", data=keep)
-                                st.success("Workout deleted!"); st.cache_data.clear(); st.rerun()
-
-def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None):
-    """Shared helper: builds HTML body for split sheets (new or reprint)."""
-    active_athletes = roster_df[(roster_df["Role"].str.upper() == "ATHLETE")].copy()
-    athlete_opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}" for _, row in active_athletes.iterrows()}
-
-    def get_prior_time(uname, meet_name):
-        prior = races_df[(races_df["Username"] == uname) & (races_df["Meet_Name"] == meet_name) & (races_df["Total_Time"].str.strip() != "")].copy()
-        if not prior.empty:
-            prior["sec"] = prior["Total_Time"].apply(time_to_seconds)
-            prior = prior[prior["sec"] > 0]
-            if not prior.empty: return seconds_to_time(prior["sec"].min())
-        all_5k = races_df[(races_df["Username"] == uname) & (races_df["Distance"].str.upper() == "5K") & (races_df["Total_Time"].str.strip() != "")].copy()
-        if not all_5k.empty:
-            all_5k["sec"] = all_5k["Total_Time"].apply(time_to_seconds)
-            all_5k = all_5k[all_5k["sec"] > 0]
-            if not all_5k.empty: return f"{seconds_to_time(all_5k['sec'].min())} (PR)"
-        return ""
-
-    html = f"<h2>{p_meet} - Split Sheet</h2>"
-    meet_rows = races_df[races_df["Meet_Name"] == p_meet]
-    races_to_show = race_list if race_list else [{"name": rn, "dist": meet_rows[meet_rows["Race_Name"] == rn]["Distance"].iloc[0] if not meet_rows[meet_rows["Race_Name"] == rn].empty else ""} for rn in meet_rows["Race_Name"].unique()]
-
-    for race in races_to_show:
-        r_name = race["name"] if isinstance(race, dict) else race
-        r_dist = race["dist"] if isinstance(race, dict) else ""
-        runners = race.get("runners", meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist()) if isinstance(race, dict) else meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist()
-        html += f"<div class='keep-together'><h3>{r_name} ({r_dist})</h3><table><tr><th>Athlete</th><th>Prior Best at Meet</th><th>1 Mile</th><th>2 Mile</th><th>Finish</th></tr>"
-        for uname in runners:
-            html += f"<tr><td>{athlete_opts.get(uname, uname)}</td><td>{get_prior_time(uname, p_meet)}</td><td></td><td></td><td></td></tr>"
-        html += "</table></div>"
-    return html
-
-def _tab_meet_setup():
-    st.subheader("Meet Setup & Printables")
-    print_action = st.radio("Select Tool:", ["Attendance Sheet", "Create New Meet / Print Sheet", "Re-Print Existing Meet"], horizontal=True)
-    st.markdown("---")
-
-    if print_action == "Attendance Sheet":
-        col_a1, col_a2, col_a3 = st.columns(3)
-        p_gender = col_a1.selectbox("Team", ["Boys", "Girls"])
-        p_type = col_a2.selectbox("Season Type", ["Summer", "School Year"])
-        p_week = col_a3.text_input("Week Of (e.g., Aug 12 - 16)")
-        if st.button("Generate Attendance Sheet", type="primary"):
-            target_gender = "Male" if p_gender == "Boys" else "Female"
-            active_athletes = roster_data[(roster_data["Role"].str.upper() == "ATHLETE") & (roster_data["Active_Clean"].isin(ACTIVE_FLAGS)) & (roster_data["Gender"].str.title() == target_gender)].sort_values("Last_Name")
-            if p_type == "Summer":
-                columns_data = [("Mon In", True), ("Mon Out", True), ("Tues In", False), ("Tues Out", False), ("Thur In", True), ("Thur Out", True)]
-            else:
-                columns_data = [("Mon In", True), ("Mon Out", True), ("Tues In", False), ("Tues Out", False), ("Wed In", True), ("Wed Out", True), ("Thurs In", False), ("Thurs Out", False), ("Fri In", True), ("Fri Out", True)]
-            html = f"<h2>{p_gender.upper()} {p_type.upper()} ATTENDANCE</h2>"
-            if p_week: html += f"<h3>WEEK OF: {p_week}</h3>"
-            html += "<table style='table-layout: fixed;'><tr><th style='width: 25%;'>Runner</th>"
-            for c_text, is_shaded in columns_data:
-                html += f"<th style='background-color: {'#e2e8f0' if is_shaded else '#ffffff'} !important;'>{c_text}</th>"
-            html += "</tr>"
-            for _, row in active_athletes.iterrows():
-                html += f"<tr><td>{row['Last_Name']}, {row['First_Name']}</td>"
-                for _, is_shaded in columns_data:
-                    html += f"<td style='background-color: {'#f1f5f9' if is_shaded else '#ffffff'} !important;'></td>"
-                html += "</tr>"
-            html += "</table>"
-            final_html = wrap_html_for_print(f"{p_gender} Attendance", html, is_attendance=True)
-            st.success("Your printable sheet is ready! Download the HTML file and print it.")
-            st.download_button(label="Download Printable HTML Sheet", data=final_html, file_name=f"{p_gender}_Attendance.html", mime="text/html")
-
-    elif print_action == "Create New Meet / Print Sheet":
-        st.markdown("Build your race entries here to instantly generate a printable clipboard sheet AND save the pending roster to the database.")
-        c_m1, c_m2 = st.columns(2)
-        with c_m1: p_meet = st.text_input("New Meet Name", placeholder="e.g. Asics Invitational", autocomplete="off")
-        with c_m2: p_date = st.date_input("Meet Date")
+    elif action == "Team Documents":
+        st.subheader("Team Documents")
+        st.info("Paste 'Publish to Web' links from Google Docs. They appear on every athlete's Team Resources tab. (File → Share → Publish to Web → Copy Link)")
+        edited_docs = st.data_editor(docs_data, num_rows="dynamic", use_container_width=True)
+        if st.button("💾 Save Documents", type="primary"):
+            try:
+                with st.spinner("Saving..."): conn.update(worksheet="Documents", data=edited_docs)
+                st.success("✅ Documents updated!"); st.cache_data.clear(); st.rerun()
+            except Exception:
+                st.error("Missing tab — add a sheet named **Documents** in your Google Sheet.")
         st.markdown("---")
-        race_count = st.number_input("How many separate races do you need?", min_value=1, max_value=10, value=2)
-        active_athletes = roster_data[(roster_data["Role"].str.upper() == "ATHLETE") & (roster_data["Active_Clean"].isin(ACTIVE_FLAGS))].copy()
-        assigned_runners = set()
-        for j in range(race_count): assigned_runners.update(st.session_state.get(f"rrunners_{j}", []))
-        races_to_print = []
-        for i in range(race_count):
-            st.markdown(f"**Race Block {i+1}**")
-            r_col1, r_col2, r_col3 = st.columns([2, 1, 1])
-            with r_col1: r_name = st.text_input("Race Title", placeholder="e.g. Boys Champ", key=f"rname_{i}", autocomplete="off")
-            with r_col2: r_dist = st.selectbox("Distance", ["5K", "2 Mile", "Other"], key=f"rdist_{i}")
-            with r_col3: r_filter = st.selectbox("Filter Runners", ["All", "Boys", "Girls"], key=f"rfilt_{i}")
-            avail = active_athletes.copy()
-            if r_filter == "Boys": avail = avail[avail["Gender"].str.title() == "Male"]
-            elif r_filter == "Girls": avail = avail[avail["Gender"].str.title() == "Female"]
-            other_runners = assigned_runners - set(st.session_state.get(f"rrunners_{i}", []))
-            avail = avail[~avail["Username"].isin(other_runners)]
-            athlete_opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}" for _, row in avail.sort_values("Last_Name").iterrows()}
-            r_runners = st.multiselect("Select Runners", options=list(athlete_opts.keys()), format_func=lambda x: athlete_opts[x], key=f"rrunners_{i}")
-            if r_name and r_runners: races_to_print.append({"name": r_name, "dist": r_dist, "runners": r_runners})
-            st.markdown("<br>", unsafe_allow_html=True)
-
-        if st.button("Generate Sheet & Save Meet Setup", type="primary"):
-            if not p_meet: st.error("Please enter a Meet Name.")
-            elif not races_to_print: st.warning("Please configure at least one race with runners.")
-            else:
-                formatted_date = pd.to_datetime(p_date).strftime("%Y-%m-%d")
-                season = calculate_season(formatted_date)
-                new_rows = [{"Date": formatted_date, "Meet_Name": p_meet, "Race_Name": race["name"], "Distance": race["dist"], "Username": uname, "Mile_1": "", "Mile_2": "", "Total_Time": "", "Weight": 1.0, "Active": "TRUE", "Season": season}
-                            for race in races_to_print for uname in race["runners"]
-                            if races_data[(races_data["Meet_Name"] == p_meet) & (races_data["Race_Name"] == race["name"]) & (races_data["Username"] == uname)].empty]
-                if new_rows:
-                    updated = pd.concat([races_data, pd.DataFrame(new_rows)], ignore_index=True)
-                    with st.spinner("Saving to database..."): conn.update(worksheet="Races", data=updated)
-                    st.cache_data.clear()
-                html_body = _build_split_sheet_html(p_meet, races_data, roster_data, races_to_print)
-                final_html = wrap_html_for_print(f"{p_meet} Split Sheet", html_body)
-                st.success(f"Successfully created '{p_meet}'! You can now download the sheet or go to 'Data Entry' to input times.")
-                st.download_button(label="Download Printable HTML Sheet", data=final_html, file_name=f"{p_meet.replace(' ', '_')}_Sheet.html", mime="text/html")
-
-    elif print_action == "Re-Print Existing Meet":
-        active_meets = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]["Meet_Name"].dropna().unique().tolist()
-        col_p1, _ = st.columns([1, 1])
-        with col_p1: p_meet = st.selectbox("Select Existing Meet to Print", ["-- Select Meet --"] + active_meets)
-        if p_meet != "-- Select Meet --":
-            if st.button("Generate Print Sheet", type="primary"):
-                html_body = _build_split_sheet_html(p_meet, races_data, roster_data)
-                final_html = wrap_html_for_print(f"{p_meet} Split Sheet", html_body)
-                st.success("Your printable sheet is ready!")
-                st.download_button(label="Download Printable HTML Sheet", data=final_html, file_name=f"{p_meet.replace(' ', '_')}_Sheet.html", mime="text/html")
+        display_team_resources()
 
 # ---- ATHLETE VIEW ----
 def _athlete_view():
