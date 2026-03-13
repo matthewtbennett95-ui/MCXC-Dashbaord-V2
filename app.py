@@ -619,6 +619,26 @@ vdot_data = _read_sheet("VDOT", DEFAULT_VDOT, "5K_Time")
 rest_data = _read_sheet("Rest", DEFAULT_REST, "Workout")
 docs_data = _read_sheet("Documents", DEFAULT_DOCS, "Title")
 
+DEFAULT_ANNOUNCEMENTS = pd.DataFrame(columns=["ID","Title","Message","Link","Link_Label","Posted_By","Date_Posted","Active"])
+
+def _load_announcements():
+    """
+    Loads the Announcements sheet. Returns an empty DataFrame with the correct
+    columns if the sheet doesn't exist yet, so the rest of the app never
+    has to guard against missing columns.
+    """
+    try:
+        df = conn.read(worksheet="Announcements", ttl=300).dropna(how="all")
+        required = ["ID","Title","Message","Link","Link_Label","Posted_By","Date_Posted","Active"]
+        for col in required:
+            if col not in df.columns: df[col] = ""
+        return df
+    except:
+        return DEFAULT_ANNOUNCEMENTS.copy()
+
+announcements_data = _load_announcements()
+
+
 # Clean up data
 for df, col in [(roster_data, "Username"), (races_data, "Username"), (workouts_data, "Username")]:
     if col in df.columns: df.dropna(subset=[col], inplace=True)
@@ -2110,15 +2130,18 @@ def _tab_manage():
       - Pacing & Rest: edit VDOT table and rest cycle table
       - Team Documents: manage embedded Google Doc links
     """
-    st.subheader("⚙️ Manage")
+    st.subheader("Manage")
     action = st.radio(
         "Select task:",
-        ["Meet Weights", "Archive a Meet", "Pacing & Rest Tables", "Team Documents"],
+        ["Announcements", "Meet Weights", "Archive a Meet", "Pacing & Rest Tables", "Team Documents"],
         horizontal=True
     )
     st.markdown("---")
 
-    if action == "Meet Weights":
+    if action == "Announcements":
+        _manage_announcements()
+
+    elif action == "Meet Weights":
         st.subheader("Meet Multipliers & Weights")
         st.info(f"Adjusting weights for the **{CURRENT_SEASON}** season. Weight 0 = excluded from rankings.")
         active_races  = races_data[(races_data["Active"].isin(ACTIVE_FLAGS)) &
@@ -2197,24 +2220,255 @@ def _tab_manage():
         st.markdown("---")
         display_team_resources()
 
+
+# ==========================================
+# ANNOUNCEMENTS — SHARED DISPLAY HELPER
+# ==========================================
+
+def _render_announcement_card(row, show_controls=False):
+    """
+    Renders a single announcement as a styled card.
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row from announcements_data.
+    show_controls : bool
+        If True, renders Archive / Restore buttons (coach view only).
+        Athletes never see controls.
+
+    Card layout:
+        ┌──────────────────────────────────────┐
+        │  Title                    Date Posted │
+        │  Message body                         │
+        │  [Link label →] (if link present)     │
+        │  [Archive] (coach only)               │
+        └──────────────────────────────────────┘
+    """
+    T = THEMES[st.session_state["theme"]]
+    is_active = str(row.get("Active","TRUE")).strip().upper() in ACTIVE_FLAGS
+
+    # Dim archived cards slightly in coach view
+    opacity = "1.0" if is_active else "0.55"
+    border_color = T["metric_border"] if is_active else "#888888"
+
+    try:
+        posted_date = pd.to_datetime(row["Date_Posted"]).strftime("%b %d, %Y")
+    except:
+        posted_date = str(row.get("Date_Posted",""))
+
+    title   = str(row.get("Title","")).strip()
+    message = str(row.get("Message","")).strip()
+    link    = str(row.get("Link","")).strip()
+    label   = str(row.get("Link_Label","")).strip() or "View Link"
+    posted_by = str(row.get("Posted_By","Coach")).strip()
+
+    link_html = ""
+    if link.startswith("http"):
+        link_html = f"""
+        <a href="{link}" target="_blank" rel="noopener noreferrer"
+           style="display:inline-block; margin-top:10px; font-size:13px;
+                  color:{T['line']}; font-weight:600; text-decoration:none;">
+            {label} &rarr;
+        </a>"""
+
+    archived_badge = "" if is_active else "<span style='font-size:11px; color:#888; margin-left:8px;'>(Archived)</span>"
+
+    st.markdown(f"""
+    <div style="
+        background-color: {T['metric_bg']};
+        border: 1px solid {border_color};
+        border-left: 4px solid {T['line']};
+        border-radius: 8px;
+        padding: 16px 20px 12px 20px;
+        margin-bottom: 14px;
+        opacity: {opacity};
+    ">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+            <span style="font-size:15px; font-weight:700; color:{T['header']};">
+                {title}{archived_badge}
+            </span>
+            <span style="font-size:11px; color:{T['text']}; opacity:0.6; white-space:nowrap; margin-left:12px;">
+                {posted_date} &bull; {posted_by}
+            </span>
+        </div>
+        <p style="margin:8px 0 0 0; font-size:13px; color:{T['text']}; line-height:1.6;">
+            {message}
+        </p>
+        {link_html}
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Coach-only controls rendered below the card (outside the HTML block
+    # so Streamlit buttons work normally)
+    if show_controls:
+        ann_id = str(row.get("ID",""))
+        if is_active:
+            if st.button("Archive", key=f"ann_archive_{ann_id}"):
+                announcements_data.loc[announcements_data["ID"] == ann_id, "Active"] = "FALSE"
+                with st.spinner("Archiving..."):
+                    conn.update(worksheet="Announcements", data=announcements_data)
+                st.cache_data.clear(); st.rerun()
+        else:
+            col_r, col_d = st.columns([1, 4])
+            with col_r:
+                if st.button("Restore", key=f"ann_restore_{ann_id}"):
+                    announcements_data.loc[announcements_data["ID"] == ann_id, "Active"] = "TRUE"
+                    with st.spinner("Restoring..."):
+                        conn.update(worksheet="Announcements", data=announcements_data)
+                    st.cache_data.clear(); st.rerun()
+            with col_d:
+                if st.button("🗑️ Delete Permanently", key=f"ann_delete_{ann_id}"):
+                    keep = announcements_data[announcements_data["ID"] != ann_id]
+                    with st.spinner("Deleting..."):
+                        conn.update(worksheet="Announcements", data=keep)
+                    st.cache_data.clear(); st.rerun()
+        st.markdown("<div style='margin-bottom:4px;'></div>", unsafe_allow_html=True)
+
+
+# ==========================================
+# ANNOUNCEMENTS — COACH MANAGE SECTION
+# ==========================================
+
+def _manage_announcements():
+    """
+    Coach interface for announcements inside the Manage tab.
+
+    Two sub-sections:
+      - Post New Announcement : title, message, optional link + label
+      - Manage Existing        : shows all announcements (active and archived)
+                                 with Archive / Restore / Delete controls
+    """
+    st.subheader("Announcements")
+    ann_action = st.radio(
+        "Action:",
+        ["Post New Announcement", "Manage Existing"],
+        horizontal=True,
+        key="ann_action_radio"
+    )
+    st.markdown("---")
+
+    if ann_action == "Post New Announcement":
+        st.markdown("### New Announcement")
+        with st.form("new_announcement_form"):
+            title   = st.text_input("Title", placeholder="e.g. Practice cancelled Thursday", autocomplete="off")
+            message = st.text_area("Message", placeholder="Full details here...", height=120)
+            st.markdown("**Optional Link**")
+            lc1, lc2 = st.columns(2)
+            link       = lc1.text_input("URL", placeholder="https://...", autocomplete="off")
+            link_label = lc2.text_input("Link Label", placeholder="e.g. View Meet Info", autocomplete="off")
+
+            if st.form_submit_button("Post Announcement"):
+                if not title.strip():
+                    st.error("A title is required.")
+                elif not message.strip():
+                    st.error("A message body is required.")
+                else:
+                    # Generate a simple unique ID: timestamp-based
+                    new_id = str(int(pd.Timestamp.now().timestamp()))
+                    new_row = pd.DataFrame([{
+                        "ID":          new_id,
+                        "Title":       title.strip(),
+                        "Message":     message.strip(),
+                        "Link":        link.strip(),
+                        "Link_Label":  link_label.strip(),
+                        "Posted_By":   f"{st.session_state['first_name']} {st.session_state['last_name']}",
+                        "Date_Posted": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                        "Active":      "TRUE",
+                    }])
+                    updated = pd.concat([announcements_data, new_row], ignore_index=True)
+                    with st.spinner("Posting..."):
+                        conn.update(worksheet="Announcements", data=updated)
+                    st.success(f"Announcement '{title.strip()}' posted.")
+                    st.cache_data.clear(); st.rerun()
+
+    elif ann_action == "Manage Existing":
+        st.markdown("### All Announcements")
+        if announcements_data.empty:
+            st.info("No announcements have been posted yet.")
+            return
+
+        # Sort newest first
+        df = announcements_data.copy()
+        df["Date_Obj"] = pd.to_datetime(df["Date_Posted"], errors="coerce")
+        df = df.sort_values("Date_Obj", ascending=False)
+
+        active_df   = df[df["Active"].astype(str).str.upper().isin(ACTIVE_FLAGS)]
+        archived_df = df[~df["Active"].astype(str).str.upper().isin(ACTIVE_FLAGS)]
+
+        st.markdown(f"**Active ({len(active_df)})**")
+        if active_df.empty:
+            st.info("No active announcements.")
+        else:
+            for _, row in active_df.iterrows():
+                _render_announcement_card(row, show_controls=True)
+
+        if not archived_df.empty:
+            with st.expander(f"Archived ({len(archived_df)})"):
+                for _, row in archived_df.iterrows():
+                    _render_announcement_card(row, show_controls=True)
+
+
+# ==========================================
+# ANNOUNCEMENTS — ATHLETE FEED
+# ==========================================
+
+def _athlete_announcements_tab():
+    """
+    Read-only announcement feed shown to athletes.
+    Displays all active announcements newest first.
+    No controls — athletes cannot archive or delete.
+    """
+    st.subheader("Announcements")
+
+    active = announcements_data[
+        announcements_data["Active"].astype(str).str.upper().isin(ACTIVE_FLAGS)
+    ].copy()
+
+    if active.empty:
+        st.info("No announcements from your coaches at this time. Check back soon.")
+        return
+
+    active["Date_Obj"] = pd.to_datetime(active["Date_Posted"], errors="coerce")
+    active = active.sort_values("Date_Obj", ascending=False)
+
+    for _, row in active.iterrows():
+        _render_announcement_card(row, show_controls=False)
+
+
 # ---- ATHLETE VIEW ----
 def _athlete_view():
+    """
+    Athlete dashboard tabs:
+      - Announcements : active coach announcements, newest first
+      - My Season     : race results, workouts, paces, career PRs
+      - Team Rankings : leaderboard and master grid
+      - Team Resources: embedded Google Docs
+    Announcements is placed first so athletes see it immediately on login.
+    """
     st.header("Training Dashboard")
-    st.markdown("Your historical training and race data is below.")
-    tab_dash, tab_rankings, tab_resources = st.tabs(["My Season", "Team Rankings", "Team Resources"])
+    tab_announce, tab_dash, tab_rankings, tab_resources = st.tabs([
+        "Announcements", "My Season", "Team Rankings", "Team Resources"
+    ])
+
+    with tab_announce:
+        _athlete_announcements_tab()
 
     with tab_dash:
         u_races = races_data[races_data["Username"] == st.session_state["username"]]
         u_works = workouts_data[workouts_data["Username"] == st.session_state["username"]]
         athlete_seasons = sorted(set(u_races["Season"].tolist() + u_works["Season"].tolist()), reverse=True) or [CURRENT_SEASON]
         col_s1, _ = st.columns([1, 3])
-        with col_s1: sel_season = st.selectbox("View Season:", athlete_seasons, key="athlete_dash_season")
+        with col_s1:
+            sel_season = st.selectbox("View Season:", athlete_seasons, key="athlete_dash_season")
         st.markdown("---")
-        user_races = u_races[(u_races["Active"].isin(ACTIVE_FLAGS)) & (u_races["Season"] == sel_season)].copy()
+        user_races    = u_races[(u_races["Active"].isin(ACTIVE_FLAGS)) & (u_races["Season"] == sel_season)].copy()
         user_workouts = u_works[u_works["Season"] == sel_season].copy()
         col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric(label=f"Races Completed ({sel_season})", value=len(user_races[user_races["Total_Time"].str.strip() != ""]))
-        col_m2.metric(label=f"Workouts Logged ({sel_season})", value=len(user_workouts[user_workouts["Status"] == "Present"]))
+        col_m1.metric(label=f"Races Completed ({sel_season})",
+                      value=len(user_races[user_races["Total_Time"].str.strip() != ""]))
+        col_m2.metric(label=f"Workouts Logged ({sel_season})",
+                      value=len(user_workouts[user_workouts["Status"] == "Present"]))
         fastest_5k = "N/A"
         if not user_races.empty:
             five_k = user_races[user_races["Distance"].str.upper() == "5K"]
@@ -2223,11 +2477,13 @@ def _athlete_view():
                 if fastest_sec != float("inf"): fastest_5k = seconds_to_time(fastest_sec)
         col_m3.metric(label=f"5K PR ({sel_season})", value=fastest_5k)
         st.markdown("<br>", unsafe_allow_html=True)
-        sub_races, sub_workouts, sub_paces, sub_career = st.tabs(["Race Results", "Workouts", "Training Paces", "Career PRs"])
-        with sub_races: display_athlete_races(st.session_state["username"], sel_season)
+        sub_races, sub_workouts, sub_paces, sub_career = st.tabs([
+            "Race Results", "Workouts", "Training Paces", "Career PRs"
+        ])
+        with sub_races:    display_athlete_races(st.session_state["username"], sel_season)
         with sub_workouts: display_athlete_workouts(st.session_state["username"], sel_season)
-        with sub_paces: display_suggested_paces(st.session_state["username"])
-        with sub_career: display_career_history(st.session_state["username"])
+        with sub_paces:    display_suggested_paces(st.session_state["username"])
+        with sub_career:   display_career_history(st.session_state["username"])
 
     with tab_rankings:
         show_rankings_tab()
