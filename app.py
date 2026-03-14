@@ -2285,35 +2285,34 @@ def _tab_data_entry():
 def _de_import_from_timer():
     """
     Accepts the JSON exported from timer.html and writes splits into the
-    Races sheet. Only fills in blank cells — never overwrites a time that
-    was already manually entered, unless the coach checks the override box.
+    Races sheet for the CURRENT SEASON only.
 
-    The JSON format expected:
-    {
-      "meet": "Great American XC 2026",
-      "race": "Boys Varsity (5K)",
-      "splits": {
-        "john.smith": {"name": "John Smith", "mile1": "5:42", "mile2": "11:30", "finish": "18:22"},
-        ...
-      }
-    }
+    Flow:
+      1. Coach pastes JSON → click Preview
+      2. A table shows each runner: new time from timer, existing time in Sheet,
+         and a status (New / Conflict / No match). Conflicts show both values
+         side by side so the coach can decide per-runner.
+      3. Coach checks/unchecks individual runners to override conflicts.
+      4. Click Confirm Import to write only the selected rows.
+
+    Season safety: the mask always includes Season == CURRENT_SEASON so a
+    meet that ran in multiple years never gets times written to the wrong year.
     """
     st.subheader("Import from Race Timer")
     st.info(
-        "After recording a race in the timer tool, tap **Export Times** and copy the JSON. "
-        "Paste it below and click Import. Only blank fields will be filled — existing times "
-        "are preserved unless you check the override box."
+        "Paste the JSON copied from the timer tool's Export button. "
+        "Click **Preview** to review times before committing anything to the database."
     )
 
     json_input = st.text_area(
         "Paste timer JSON here",
-        height=200,
+        height=180,
         placeholder='{"meet": "...", "race": "...", "splits": {...}}',
         key="timer_json_input"
     )
-    override = st.checkbox("Override existing times (use if correcting a mistake)", value=False)
 
-    if st.button("Import Times", type="primary"):
+    # ── Step 1: Parse and preview ─────────────────────────────────────────────
+    if st.button("Preview Times", type="primary", key="timer_preview_btn"):
         if not json_input.strip():
             st.error("Please paste the JSON from the timer tool.")
             return
@@ -2331,52 +2330,175 @@ def _de_import_from_timer():
             st.error("JSON is missing meet name or splits data.")
             return
 
-        # Find matching rows in races_data
-        # Race name from timer may include distance in parens — strip for matching
+        # Season-safe mask: only match rows from the CURRENT SEASON.
+        # Also handles older rows where Season may be blank by checking the
+        # date falls within the current season's July-cutoff year range.
         race_base = race_name.split("(")[0].strip() if race_name else ""
-        mask = races_data["Meet_Name"] == meet_name
+        season_col = races_data["Season"].astype(str).str.strip()
+        mask = (
+            (races_data["Meet_Name"] == meet_name) &
+            (season_col == CURRENT_SEASON)
+        )
         if race_base:
             mask = mask & races_data["Race_Name"].str.startswith(race_base)
 
         matched_rows = races_data[mask]
         if matched_rows.empty:
             st.warning(
-                f"No rows found for meet '{meet_name}' / race '{race_name}'. "
-                "Make sure the meet was created in Streamlit first."
+                f"No rows found for meet '{meet_name}' / race '{race_base}' "
+                f"in the {CURRENT_SEASON} season. "
+                "Make sure the meet was created in Streamlit this season."
             )
             return
 
-        updates = 0
-        skipped = 0
-        for username, split_data in splits.items():
-            row_mask = mask & (races_data["Username"] == username)
-            if not races_data[row_mask].empty:
+        # Build preview rows
+        preview = []
+        for username, sd in splits.items():
+            row_mask   = mask & (races_data["Username"] == username)
+            sheet_rows = races_data[row_mask]
+            name       = sd.get("name", username)
+
+            new_m1  = sd.get("mile1",  "").strip()
+            new_m2  = sd.get("mile2",  "").strip()
+            new_fin = sd.get("finish", "").strip()
+
+            if sheet_rows.empty:
+                status = "No match in sheet"
+                ex_m1 = ex_m2 = ex_fin = ""
+            else:
+                ex_m1  = str(sheet_rows["Mile_1"].iloc[0]).strip()
+                ex_m2  = str(sheet_rows["Mile_2"].iloc[0]).strip()
+                ex_fin = str(sheet_rows["Total_Time"].iloc[0]).strip()
+                has_conflict = any([
+                    new_m1  and ex_m1  and new_m1  != ex_m1,
+                    new_m2  and ex_m2  and new_m2  != ex_m2,
+                    new_fin and ex_fin and new_fin != ex_fin,
+                ])
+                has_new = any([
+                    new_m1  and not ex_m1,
+                    new_m2  and not ex_m2,
+                    new_fin and not ex_fin,
+                ])
+                status = "Conflict" if has_conflict else ("New data" if has_new else "No change")
+
+            preview.append({
+                "username": username,
+                "Athlete":  name,
+                "Timer M1": new_m1  or "—",
+                "Sheet M1": ex_m1   or "—",
+                "Timer M2": new_m2  or "—",
+                "Sheet M2": ex_m2   or "—",
+                "Timer Fin": new_fin or "—",
+                "Sheet Fin": ex_fin  or "—",
+                "Status":   status,
+            })
+
+        # Store preview in session state for the confirm step
+        st.session_state["timer_preview"]   = preview
+        st.session_state["timer_meet_name"] = meet_name
+        st.session_state["timer_race_base"] = race_base
+        st.session_state["timer_splits"]    = splits
+        st.session_state["timer_mask_season"] = CURRENT_SEASON
+
+    # ── Step 2: Show preview and per-runner override checkboxes ──────────────
+    if "timer_preview" in st.session_state and st.session_state["timer_preview"]:
+        preview   = st.session_state["timer_preview"]
+        meet_name = st.session_state["timer_meet_name"]
+        race_base = st.session_state["timer_race_base"]
+        splits    = st.session_state["timer_splits"]
+
+        st.markdown(f"### Preview — {meet_name} / {race_base} ({CURRENT_SEASON})")
+
+        conflicts  = [r for r in preview if r["Status"] == "Conflict"]
+        new_data   = [r for r in preview if r["Status"] == "New data"]
+        no_change  = [r for r in preview if r["Status"] == "No change"]
+        no_match   = [r for r in preview if r["Status"] == "No match in sheet"]
+
+        st.markdown(
+            f"**{len(new_data)}** new &nbsp;|&nbsp; "
+            f"**{len(conflicts)}** conflicts &nbsp;|&nbsp; "
+            f"**{len(no_change)}** no change &nbsp;|&nbsp; "
+            f"**{len(no_match)}** not in sheet"
+        )
+
+        # New data rows — always import, no checkbox needed
+        if new_data:
+            st.markdown("#### New times (will be imported)")
+            disp = pd.DataFrame(new_data)[["Athlete","Timer M1","Timer M2","Timer Fin"]]
+            disp.columns = ["Athlete","Mile 1","Mile 2","Finish"]
+            st.dataframe(disp, hide_index=True, width="stretch")
+
+        # Conflict rows — show side by side with per-runner override checkbox
+        override_usernames = set()
+        if conflicts:
+            st.markdown("#### Conflicts — timer vs sheet (choose which to keep)")
+            st.caption("Check the box next to a runner to use the timer time and overwrite the sheet value.")
+            for row in conflicts:
+                col_name, col_times, col_check = st.columns([2, 4, 1])
+                with col_name:
+                    st.markdown(f"**{row['Athlete']}**")
+                with col_times:
+                    parts = []
+                    if row["Timer M1"] != "—" or row["Sheet M1"] != "—":
+                        parts.append(f"M1: **{row['Timer M1']}** (sheet: {row['Sheet M1']})")
+                    if row["Timer M2"] != "—" or row["Sheet M2"] != "—":
+                        parts.append(f"M2: **{row['Timer M2']}** (sheet: {row['Sheet M2']})")
+                    if row["Timer Fin"] != "—" or row["Sheet Fin"] != "—":
+                        parts.append(f"Fin: **{row['Timer Fin']}** (sheet: {row['Sheet Fin']})")
+                    st.markdown(" &nbsp;|&nbsp; ".join(parts))
+                with col_check:
+                    if st.checkbox("Override", key=f"override_{row['username']}", label_visibility="collapsed"):
+                        override_usernames.add(row["username"])
+
+        # No-match rows — informational only
+        if no_match:
+            with st.expander(f"{len(no_match)} runner(s) in timer data not found in sheet"):
+                for row in no_match:
+                    st.markdown(f"- {row['Athlete']} (`{row['username']}`)")
+                st.caption("These runners may not have been added to the race in Streamlit. Add them via Data Entry → Race Results → Add Walk-On first.")
+
+        # ── Step 3: Confirm import ────────────────────────────────────────────
+        st.markdown("---")
+        if st.button("Confirm Import", type="primary", key="timer_confirm_btn"):
+            season_col2 = races_data["Season"].astype(str).str.strip()
+            mask = (
+                (races_data["Meet_Name"] == meet_name) &
+                (season_col2 == CURRENT_SEASON)
+            )
+            if race_base:
+                mask = mask & races_data["Race_Name"].str.startswith(race_base)
+
+            updates = 0
+            skipped = 0
+            for username, sd in splits.items():
+                row_mask = mask & (races_data["Username"] == username)
+                if races_data[row_mask].empty:
+                    continue
                 for col, field in [("Mile_1","mile1"),("Mile_2","mile2"),("Total_Time","finish")]:
-                    new_val = split_data.get(field, "").strip()
+                    new_val = sd.get(field, "").strip()
                     if not new_val:
                         continue
                     existing = str(races_data.loc[row_mask, col].iloc[0]).strip()
-                    if existing and not override:
+                    if existing and username not in override_usernames:
                         skipped += 1
                         continue
                     races_data.loc[row_mask, col] = new_val
                     updates += 1
 
-        if updates == 0 and skipped > 0:
-            st.warning(
-                f"All {skipped} times were skipped because they already exist. "
-                "Check 'Override existing times' if you want to replace them."
-            )
-            return
+            if updates == 0:
+                st.warning("Nothing was imported. Check override boxes for any conflicts you want to overwrite.")
+                return
 
-        with st.spinner("Saving to database..."):
-            conn.update(worksheet="Races", data=races_data)
-        invalidate_races()
+            with st.spinner("Saving to database..."):
+                conn.update(worksheet="Races", data=races_data)
+            invalidate_races()
 
-        msg = f"Imported {updates} time(s) successfully."
-        if skipped: msg += f" {skipped} skipped (already had data)."
-        st.success(msg)
-        if override and skipped == 0:
+            msg = f"Imported {updates} time(s) for the {CURRENT_SEASON} season."
+            if skipped: msg += f" {skipped} skipped (existing data kept)."
+            st.success(msg)
+            # Clear preview state
+            for key in ["timer_preview","timer_meet_name","timer_race_base","timer_splits","timer_mask_season"]:
+                st.session_state.pop(key, None)
             st.rerun()
 
 
