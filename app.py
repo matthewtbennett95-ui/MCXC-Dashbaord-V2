@@ -890,9 +890,17 @@ def display_team_resources():
         title = str(row.get("Title", "Document"))
         st.markdown(f"#### {title}")
 
-        # "Open in new tab" shown first — primary action on mobile
+        # Primary action button — especially important on mobile where the
+        # embed is a preview only. Styled as a solid pill button matching the
+        # current theme accent color so it is easy to tap.
+        _T = THEMES[st.session_state["theme"]]
         st.markdown(
-            f'<a href="{url}" target="_blank" rel="noopener noreferrer" '            f'style="display:inline-block;margin-bottom:10px;font-size:13px;'            f'font-weight:600;text-decoration:none;">Open in new tab &rarr;</a>',
+            f'<a href="{url}" target="_blank" rel="noopener noreferrer" '
+            f'style="display:inline-block;margin-bottom:14px;padding:10px 22px;'
+            f'background-color:{_T["line"]};color:#ffffff;font-size:14px;'
+            f'font-weight:600;border-radius:6px;text-decoration:none;'
+            f'box-shadow:0 2px 6px rgba(0,0,0,0.15);">'
+            f'Open {title} &#8594;</a>',
             unsafe_allow_html=True
         )
 
