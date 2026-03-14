@@ -532,17 +532,39 @@ async function loadMeets() {
     const snap = await get(ref(db, 'meets'));
     if (snap.exists()) {
       const meets = snap.val();
-      // Sort by most recent first (using createdAt if available)
-      const sorted = Object.entries(meets).sort((a,b) => {
-        const da = a[1].date || '', db2 = b[1].date || '';
-        return db2.localeCompare(da);
-      });
-      sorted.forEach(([key, m]) => {
-        const opt = document.createElement('option');
-        opt.value = key;
-        opt.textContent = m.date ? `${m.name} (${m.date})` : m.name;
-        meetSel.appendChild(opt);
-      });
+
+      // Determine current XC season: Aug-Dec = that year, Jan-Jul = prior year
+      const now = new Date();
+      const currentSeason = now.getMonth() >= 7
+        ? String(now.getFullYear())
+        : String(now.getFullYear() - 1);
+
+      // Filter to current season only — keeps dropdown clean
+      // A meet matches if its season field equals currentSeason,
+      // OR if it has no season field but its date falls in the current season.
+      const isCurrentSeason = (m) => {
+        if (m.season) return m.season === currentSeason;
+        if (!m.date)  return true; // no date = show it (manual entry)
+        const yr = new Date(m.date).getFullYear();
+        const mo = new Date(m.date).getMonth();
+        const s  = mo >= 7 ? String(yr) : String(yr - 1);
+        return s === currentSeason;
+      };
+
+      const sorted = Object.entries(meets)
+        .filter(([, m]) => isCurrentSeason(m))
+        .sort((a, b) => (b[1].date || '').localeCompare(a[1].date || ''));
+
+      if (sorted.length === 0) {
+        meetSel.innerHTML = `<option value="">No ${currentSeason} meets found — create one in Streamlit first</option>`;
+      } else {
+        sorted.forEach(([key, m]) => {
+          const opt = document.createElement('option');
+          opt.value = key;
+          opt.textContent = m.date ? `${m.name} (${m.date})` : m.name;
+          meetSel.appendChild(opt);
+        });
+      }
     } else {
       meetSel.innerHTML = '<option value="">No meets found — create one in Streamlit first</option>';
     }
