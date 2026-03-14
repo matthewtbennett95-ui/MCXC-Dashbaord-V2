@@ -856,12 +856,20 @@ def display_suggested_paces(target_username):
 
 def display_team_resources():
     """
-    Renders each team document as a mobile-friendly scrollable iframe.
-    - The outer div uses overflow:auto + -webkit-overflow-scrolling:touch so
-      users can pinch-zoom and scroll the doc horizontally on a phone.
-    - A direct 'Open in new tab' link is shown below each doc as a fallback
-      for browsers that block iframes.
-    - Google Doc 'edit' links are converted to 'preview' links automatically.
+    Renders each team document as a responsive embedded iframe.
+
+    Layout strategy:
+    - The iframe uses width="100%" so it always fills the available column
+      width on both desktop and mobile — no fixed pixel width.
+    - A paddingBottom percentage trick (aspect-ratio container) is avoided
+      here because Google Docs pages are tall and variable, so we use a
+      fixed viewport height (85vh) instead — that fills most of the screen
+      on any device without overflowing.
+    - The "Open in new tab" link is shown prominently above the embed as the
+      primary action on mobile, since pinch-zooming inside iframes is
+      inconsistent across browsers. The embed below is a convenience preview.
+    - Google Doc 'edit' links are converted to 'preview' links for embedding.
+    - Google Doc 'pub' (Publish to Web) links are used as-is.
     """
     st.subheader("Team Resources")
     if docs_data.empty:
@@ -874,35 +882,44 @@ def display_team_resources():
         if not pd.notna(row.get("URL")) or not url.startswith("http"):
             continue
         has_valid = True
-        # Convert Google Doc edit links → embeddable preview links
+
+        # Convert Google Doc edit links to embeddable preview links
         if "edit" in url and "pub" not in url:
             url = url.replace("edit", "preview")
-        title = row.get("Title", "Document")
+
+        title = str(row.get("Title", "Document"))
         st.markdown(f"#### {title}")
-        # Wrapper div: scrollable + touch-friendly, with a min-height so the
-        # doc is usable on mobile without being a tiny unreadable box.
+
+        # "Open in new tab" shown first — primary action on mobile
+        st.markdown(
+            f'<a href="{url}" target="_blank" rel="noopener noreferrer" '            f'style="display:inline-block;margin-bottom:10px;font-size:13px;'            f'font-weight:600;text-decoration:none;">Open in new tab &rarr;</a>',
+            unsafe_allow_html=True
+        )
+
+        # Responsive iframe: 100% width, 85% of viewport height.
+        # No fixed pixel widths — scales to any screen size automatically.
         st.markdown(f"""
         <div style="
+            position: relative;
             width: 100%;
-            overflow: auto;
-            -webkit-overflow-scrolling: touch;
+            height: 85vh;
             border: 1px solid #ccc;
             border-radius: 8px;
-            margin-bottom: 8px;
+            overflow: hidden;
+            margin-bottom: 32px;
         ">
             <iframe
                 src="{url}"
-                width="900"
-                height="800"
-                style="border: none; display: block;"
+                style="
+                    position: absolute;
+                    top: 0; left: 0;
+                    width: 100%;
+                    height: 100%;
+                    border: none;
+                "
                 allowfullscreen="true"
             ></iframe>
         </div>
-        <p style="font-size: 13px; margin-top: 4px; margin-bottom: 24px;">
-            📄 <a href="{url}" target="_blank" rel="noopener noreferrer">
-                Open "{title}" in a new tab
-            </a>
-        </p>
         """, unsafe_allow_html=True)
 
     if not has_valid:
@@ -2422,7 +2439,7 @@ def _manage_announcements():
                 elif not message.strip():
                     st.error("A message body is required.")
                 else:
-                    new_id = str(int(pd.Timestamp.now().timestamp()))
+                    new_id = str(int(pd.Timestamp.now(tz="America/New_York").timestamp()))
                     new_row = pd.DataFrame([{
                         "ID":          new_id,
                         "Title":       title.strip(),
@@ -2431,7 +2448,7 @@ def _manage_announcements():
                         "Link_Label":  link_label.strip(),
                         "Posted_By":   f"{st.session_state['first_name']} {st.session_state['last_name']}",
                         # Store full datetime so time is available on the card
-                        "Date_Posted": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+                        "Date_Posted": pd.Timestamp.now(tz="America/New_York").strftime("%Y-%m-%d %H:%M"),
                         "Active":      "TRUE",
                     }])
                     updated = pd.concat([announcements_data, new_row], ignore_index=True)
