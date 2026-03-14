@@ -1207,13 +1207,47 @@ def show_rankings_tab():
 
     with tab_grid:
         st.markdown(f"### Master {r_dist} Grid")
+
+        # Sort toggle — default is leaderboard (weighted avg), can switch to name
+        g_col1, _ = st.columns([2, 3])
+        with g_col1:
+            grid_sort = st.radio(
+                "Sort by:",
+                ["Leaderboard (Weighted Avg)", "Last Name", "First Name"],
+                horizontal=True,
+                key="grid_sort_radio"
+            )
+
         grid_df = merged.copy()
-        grid_df["Athlete"] = grid_df["First_Name"] + " " + grid_df["Last_Name"]
-        grid_df["Date_Obj"] = pd.to_datetime(grid_df["Date"], errors="coerce")
+        grid_df["Athlete"]    = grid_df["First_Name"] + " " + grid_df["Last_Name"]
+        grid_df["Last_Name_S"]  = grid_df["Last_Name"]
+        grid_df["First_Name_S"] = grid_df["First_Name"]
+        grid_df["Date_Obj"]   = pd.to_datetime(grid_df["Date"], errors="coerce")
         grid_df = grid_df.sort_values("Date_Obj")
-        grid_df["Race_Col"] = grid_df["Meet_Name"] + " (" + grid_df["Date_Obj"].dt.strftime("%m/%d").fillna("") + ") [" + grid_df["Weight"].apply(lambda x: f"{float(x):.1f}") + "x]"
+        grid_df["Race_Col"]   = grid_df["Meet_Name"] + " (" + grid_df["Date_Obj"].dt.strftime("%m/%d").fillna("") + ") [" + grid_df["Weight"].apply(lambda x: f"{float(x):.1f}") + "x]"
         ordered_cols = grid_df["Race_Col"].unique().tolist()
-        pivot_df = grid_df.pivot_table(index="Athlete", columns="Race_Col", values="Total_Time", aggfunc="first").reindex(columns=ordered_cols).fillna("-").reset_index()
+        pivot_df = grid_df.pivot_table(index=["Athlete","Last_Name_S","First_Name_S"], columns="Race_Col", values="Total_Time", aggfunc="first").reindex(columns=ordered_cols).fillna("-").reset_index()
+
+        if grid_sort == "Leaderboard (Weighted Avg)":
+            # Build weighted avg per athlete to sort by
+            grid_df["Time_Sec_G"] = grid_df["Total_Time"].apply(time_to_seconds)
+            grid_df["Weight_N"]   = pd.to_numeric(grid_df["Weight"], errors="coerce").fillna(1.0)
+            avg_map = {}
+            for athlete, grp in grid_df.groupby("Athlete"):
+                valid = grp[(grp["Weight_N"] > 0) & (grp["Time_Sec_G"] > 0)]
+                if valid.empty: avg_map[athlete] = 9999
+                else:
+                    tw  = valid["Weight_N"].sum()
+                    avg_map[athlete] = (valid["Time_Sec_G"] * valid["Weight_N"]).sum() / tw
+            pivot_df["_sort"] = pivot_df["Athlete"].map(avg_map).fillna(9999)
+            pivot_df = pivot_df.sort_values("_sort").drop(columns=["_sort"])
+        elif grid_sort == "Last Name":
+            pivot_df = pivot_df.sort_values("Last_Name_S")
+        else:
+            pivot_df = pivot_df.sort_values("First_Name_S")
+
+        # Drop the helper sort columns before display
+        pivot_df = pivot_df.drop(columns=["Last_Name_S","First_Name_S"])
         st.dataframe(pivot_df, hide_index=True, width='stretch')
 
 def plot_athlete_progress(user_races):
@@ -1241,10 +1275,19 @@ def display_athlete_races(username, season):
     plot_athlete_progress(u_races)
 
     def calc_avg_pace(row):
-        if not str(row.get("Total_Time", "")).strip(): return ""
         try:
-            dist = 3.10686 if str(row["Distance"]).upper() == "5K" else 2.0
-            avg_sec = row["Time_Sec"] / dist
+            dist_str = str(row["Distance"]).upper()
+            dist = 3.10686 if dist_str == "5K" else 2.0
+            # For pace we need the total finish time in seconds.
+            # Total_Time is the canonical field, but older imports may
+            # only have it blank while Mile_2 holds the finish for 2-Mile.
+            total_sec = row["Time_Sec"]  # already computed from Total_Time
+            if total_sec <= 0 and dist_str != "5K":
+                # Fall back: try Mile_2 as finish for 2-Mile races
+                m2 = str(row.get("Mile_2","")).strip()
+                if m2: total_sec = time_to_seconds(m2)
+            if total_sec <= 0: return ""
+            avg_sec = total_sec / dist
             return f"{int(avg_sec // 60)}:{int(avg_sec % 60):02d}"
         except: return ""
 
