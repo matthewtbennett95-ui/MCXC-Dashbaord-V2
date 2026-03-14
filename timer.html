@@ -280,7 +280,10 @@ select option { background: var(--surface2); }
   </div>
   <div class="stopwatch-block">
     <div class="clock-display" id="clock">00:00.0</div>
-    <button class="start-btn" id="start-btn" onclick="handleStartStop()">START</button>
+    <div style="display: flex; gap: 10px; align-items: center;">
+      <button class="start-btn" id="start-btn" onclick="handleStartStop()">START</button>
+      <button class="btn-danger" id="reset-btn" onclick="resetRace()" style="border-radius: 10px; font-family: var(--head); font-weight: 700; text-transform: uppercase;">RESET</button>
+    </div>
   </div>
   <div class="split-selector">
     <button class="split-btn active" id="split-mile1"   onclick="selectSplit('mile1')">Mile 1</button>
@@ -669,38 +672,56 @@ window.enterTimerScreen = async function() {
   });
   renderRunnerList();
 
-  // Listen for live split updates (other coaches recording)
+// Listen for live split updates (other coaches recording)
   onValue(ref(db, `races/${selectedMeetKey}/${selectedRaceKey}/splits`), snap => {
     if (snap.exists()) {
+      // Splits exist, merge them
       Object.entries(snap.val()).forEach(([u, data]) => {
         if (!recordedSplits[u]) recordedSplits[u] = {};
-        // Merge all splits from Firebase — this is the live sync for all coaches.
-        // We always trust Firebase as the source of truth. Local taps write to
-        // Firebase immediately, so they'll come back through this listener
-        // and renderRunnerList() will show them instantly.
         ['mile1','mile2','finish'].forEach(s => {
           if (data[s]) recordedSplits[u][s] = data[s];
         });
         if (data.coach) recordedSplits[u].coach = data.coach;
       });
       renderRunnerList();
+    } else {
+      // ADDED ELSE BLOCK: Splits missing/null, a reset occurred
+      recordedSplits = {};
+      renderRunnerList();
     }
   });
 
-  // Listen for race start (so all coaches sync)
+// Listen for race start (so all coaches sync)
   onValue(ref(db, `races/${selectedMeetKey}/${selectedRaceKey}/startedAt`), snap => {
-    if (snap.exists() && snap.val() > 0 && !raceStartedAt) {
-      const wasAlreadyRunning = snap.val() < Date.now() - 3000; // started >3s ago
-      raceStartedAt = snap.val();
-      startClock();
-      $('start-btn').textContent = 'RUNNING';
-      $('start-btn').className   = 'start-btn running';
-      const notice = $('ready-notice');
-      if (notice) notice.style.display = 'none';
-      // Tell a late-joining coach the race is already in progress
-      if (wasAlreadyRunning) {
-        showToast('Race already running — clock synced', 'warning');
+    if (snap.exists() && snap.val() > 0) {
+      // The race is currently active in Firebase.
+      // Only start our local clock if we haven't already.
+      if (!raceStartedAt) {
+        const wasAlreadyRunning = snap.val() < Date.now() - 3000; // started >3s ago
+        raceStartedAt = snap.val();
+        startClock();
+        $('start-btn').textContent = 'RUNNING';
+        $('start-btn').className   = 'start-btn running';
+        const notice = $('ready-notice');
+        if (notice) notice.style.display = 'none';
+        
+        // Tell a late-joining coach the race is already in progress
+        if (wasAlreadyRunning) {
+          showToast('Race already running — clock synced', 'warning');
+        }
       }
+    } else {
+      // ADDED ELSE BLOCK: snap does NOT exist, which means a reset occurred
+      raceStartedAt = null;
+      if (clockInterval) {
+        clearInterval(clockInterval);
+        clockInterval = null;
+      }
+      $('clock').textContent = '00:00.0';
+      $('clock').className = 'clock-display';
+      $('start-btn').textContent = 'START';
+      $('start-btn').className = 'start-btn';
+      if ($('ready-notice')) $('ready-notice').style.display = 'block';
     }
   });
 
@@ -815,7 +836,54 @@ function startClock() {
   scheduleHardStop();    // absolute ceiling: 2 hours
   scheduleAutoStop();    // rolling: 40 min after last split (or race start if no splits)
 }
+// -- STOPWATC RESET ------------------------------------------------------------
+window.resetRace = async function() {
+  if (!raceStartedAt) {
+    showToast('Race has not started yet', 'warning');
+    return;
+  }
+  
+  if (!confirm('Are you sure you want to reset the stopwatch? This will clear the start time and ALL recorded splits for this race across all devices.')) {
+    return; // Cancelled by user
+  }
 
+  try {
+    // 1. Clear the start time in Firebase
+    await set(ref(db, `races/${selectedMeetKey}/${selectedRaceKey}/startedAt`), null);
+    
+    // 2. Clear all splits for this race in Firebase to prevent ghost data
+    await set(ref(db, `races/${selectedMeetKey}/${selectedRaceKey}/splits`), null);
+
+    // 3. Reset local state
+    raceStartedAt = null;
+    recordedSplits = {};
+    lastTapStack = [];
+    pendingLocal = {};
+
+    // 4. Stop the local clock interval
+    if (clockInterval) {
+      clearInterval(clockInterval);
+      clockInterval = null;
+    }
+
+    // 5. Reset UI elements back to starting state
+    $('clock').textContent = '00:00.0';
+    $('clock').className = 'clock-display';
+    $('start-btn').textContent = 'START';
+    $('start-btn').className = 'start-btn';
+    $('ready-notice').style.display = 'block'; 
+    $('undo-btn').disabled = true;
+    
+    // 6. Re-render the list to clear out any time chips next to runners
+    renderRunnerList();
+    
+    showToast('Race reset successfully', 'success');
+  } catch (error) {
+    console.error("Error resetting race:", error);
+    showToast('Failed to reset race', 'error');
+  }
+};
+  
 // ── SPLIT SELECTOR ────────────────────────────────────────────────────────────
 window.selectSplit = function(s) {
   currentSplit = s;
