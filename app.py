@@ -1775,15 +1775,19 @@ def _printable_workout_sheet():
 
 def _printable_attendance():
     """
-    Blank weekly attendance sign-in sheet.
+    Blank weekly attendance sign-in sheet. Always portrait, always one page.
 
-    Uses the same sheet-header styling as workout sheets for visual consistency.
-    Formatted to fit on a single portrait page:
-    - Name column is 32% wide, remaining space shared equally across day columns.
-    - Alternating column shading makes it easy to track which day you are in.
-    - Row height is tall enough to sign but compact enough to fit a full roster.
-    - Summer: Mon/Tues/Thurs (3 days, 6 in/out columns)
-    - School Year: Mon–Fri (5 days, 10 in/out columns) — auto-landscape if needed.
+    Design decisions:
+    - The attendance sheet gets its OWN wrap function (_wrap_attendance) instead
+      of wrap_html_for_print because it needs a completely different CSS
+      strategy: aggressive font/padding compression and @page zoom to guarantee
+      a single page up to ~45 athletes.
+    - Name column is narrow (fixed at 130px) — just enough for "Last, First".
+    - Check columns are 28px wide — only need to hold a tick mark.
+    - Row height is 18px printed — tight but readable for a checkbox list.
+    - @page uses size:portrait and zoom:0.85 so even a 40-runner roster fits.
+      For 50+ it will spill to a second page naturally rather than break layout.
+    - Alternating day shading (not row shading) so it's easy to track columns.
     """
     st.markdown("### Print Attendance Sheet")
     col_a1, col_a2, col_a3 = st.columns(3)
@@ -1803,55 +1807,160 @@ def _printable_attendance():
             cols_data = [("Mon In",True),("Mon Out",True),
                          ("Tues In",False),("Tues Out",False),
                          ("Thur In",True),("Thur Out",True)]
-            force_landscape = False
         else:
             cols_data = [("Mon In",True),("Mon Out",True),
                          ("Tues In",False),("Tues Out",False),
                          ("Wed In",True),("Wed Out",True),
                          ("Thurs In",False),("Thurs Out",False),
                          ("Fri In",True),("Fri Out",True)]
-            force_landscape = True   # 10 columns fits better in landscape
 
-        # Build header using sheet-header class (matches workout sheet style)
-        html  = '<div class="sheet-header">'
-        html += f'<h1>{p_gender} Attendance</h1>'
-        if p_week:
-            html += f'<p class="sub">Week of: {p_week} &nbsp;|&nbsp; {p_type}</p>'
-        else:
-            html += f'<p class="sub">{p_type}</p>'
-        html += '</div>'
+        n_athletes = len(athletes)
+        # Scale down slightly for larger rosters to keep on one page.
+        # 30 or fewer: full size. 31-40: 90%. 41-50: 80%. 50+: 72% (may spill).
+        if n_athletes <= 30:   zoom = 1.0
+        elif n_athletes <= 40: zoom = 0.90
+        elif n_athletes <= 50: zoom = 0.80
+        else:                  zoom = 0.72
 
-        # Table — name col 32%, remaining width split evenly across day cols
-        html += '<table style="table-layout:fixed;">'
-        html += '<tr><th style="width:32%;text-align:left;padding-left:10px;">Runner</th>'
-        for c_text, shaded in cols_data:
-            bg = "#e2e8f0" if shaded else "#f8fafc"
-            html += f'<th style="background:{bg} !important;">{c_text}</th>'
-        html += '</tr>'
+        week_line = f"Week of: {p_week} &nbsp;|&nbsp; {p_type}" if p_week else p_type
 
+        # Build table rows
+        rows_html = ""
         for _, row in athletes.iterrows():
-            html += f'<tr style="height:28px;">'
-            html += f'<td style="text-align:left;padding-left:10px;">{row["Last_Name"]}, {row["First_Name"]}</td>'
+            rows_html += '<tr>'
+            rows_html += f'<td class="name-col">{row["Last_Name"]}, {row["First_Name"]}</td>'
             for _, shaded in cols_data:
-                bg = "#f1f5f9" if shaded else "#ffffff"
-                html += f'<td style="background:{bg} !important;"></td>'
-            html += '</tr>'
-        html += '</table>'
+                bg = "#eef1f5" if shaded else "#ffffff"
+                rows_html += f'<td style="background:{bg};"></td>'
+            rows_html += '</tr>'
 
-        final_html = wrap_html_for_print(
-            f"{p_gender} Attendance",
-            html,
-            is_attendance=not force_landscape,
-            force_landscape=force_landscape
-        )
-        st.success("Sheet ready!")
+        # Column headers
+        headers_html = '<th class="name-col">Runner</th>'
+        for c_text, shaded in cols_data:
+            bg = "#d4dae3" if shaded else "#f0f2f5"
+            headers_html += f'<th style="background:{bg};">{c_text}</th>'
+
+        final_html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>{p_gender} Attendance</title>
+<style>
+    :root {{
+        --border: #b0b8c4;
+        --crimson: #8B2331;
+        --navy: #0C223F;
+        --font: 'Inter', system-ui, -apple-system, sans-serif;
+    }}
+    body {{
+        font-family: var(--font);
+        margin: 0;
+        padding: 12px 14px;
+        background: #fff;
+        color: #1e293b;
+    }}
+    @page {{
+        size: portrait;
+        margin: 0;
+    }}
+    /* Scale the entire page body at print time to fit the roster */
+    @media print {{
+        .no-print {{ display: none !important; }}
+        body {{
+            padding: 0.3in 0.35in;
+            zoom: {zoom};
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }}
+    }}
+
+    /* Header */
+    .att-header {{
+        border-left: 5px solid var(--crimson);
+        padding: 4px 0 4px 10px;
+        margin-bottom: 10px;
+    }}
+    .att-header h1 {{
+        margin: 0; font-size: 15px; font-weight: 700;
+        color: var(--navy);
+    }}
+    .att-header p {{
+        margin: 1px 0 0 0; font-size: 10px; color: #64748b;
+    }}
+
+    /* Table */
+    table {{
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+    }}
+    th, td {{
+        border: 1px solid var(--border);
+        font-size: 9px;
+        text-align: center;
+        padding: 0;
+        height: 18px;
+        overflow: hidden;
+        white-space: nowrap;
+    }}
+    th {{
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        font-size: 8px;
+        height: 20px;
+        color: #334155;
+    }}
+    th.name-col, td.name-col {{
+        text-align: left;
+        padding-left: 6px;
+        width: 130px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 9.5px;
+    }}
+    tr:nth-child(even) td.name-col {{
+        background: #fafafa;
+    }}
+
+    /* Print button */
+    .no-print {{
+        text-align: center;
+        margin-bottom: 16px;
+        padding: 12px;
+        background: #f0f4f8;
+        border-radius: 8px;
+        border: 1px solid #cbd5e1;
+    }}
+    .print-btn {{
+        background: var(--crimson); color: #fff; border: none;
+        padding: 8px 20px; border-radius: 5px; font-size: 13px;
+        font-weight: 600; cursor: pointer; text-transform: uppercase;
+        letter-spacing: 0.4px;
+    }}
+</style>
+</head><body>
+<div class="no-print">
+    <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
+    <p style="font-size:12px;color:#64748b;margin:6px 0 0 0;">
+        Uncheck <em>Headers and Footers</em> in the print dialog to remove browser date/URL.
+    </p>
+</div>
+<div class="att-header">
+    <h1>{p_gender} Attendance</h1>
+    <p>{week_line}</p>
+</div>
+<table>
+    <tr>{headers_html}</tr>
+    {rows_html}
+</table>
+</body></html>"""
+
+        st.success(f"Sheet ready! ({n_athletes} athletes)")
         st.download_button(
             label="⬇️ Download Attendance Sheet (HTML)",
             data=final_html,
             file_name=f"{p_gender}_Attendance.html",
             mime="text/html"
         )
-
 
 # ==========================================
 # COACH TAB: DATA ENTRY
