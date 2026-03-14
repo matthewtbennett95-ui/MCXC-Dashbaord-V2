@@ -285,6 +285,20 @@ select option { background: var(--surface2); }
     <div class="coach-name-label" id="coach-display"></div>
     <div class="race-label-small" id="race-display"></div>
   </div>
+  <!-- Ready notice: shown before START, hidden once race is running -->
+  <div id="ready-notice" style="
+    background: rgba(245,158,11,0.12);
+    border-bottom: 1px solid rgba(245,158,11,0.3);
+    padding: 8px 16px;
+    font-size: 12px;
+    color: #f59e0b;
+    font-family: var(--head);
+    letter-spacing: 0.5px;
+    text-align: center;
+    display: block;
+  ">
+    All coaches must select this same meet &amp; race before anyone taps START
+  </div>
   <div class="runner-list" id="runner-list">
     <div style="text-align:center;color:var(--muted);padding:40px 0;">Loading runners...</div>
   </div>
@@ -367,7 +381,7 @@ let editingSplit  = null;
 // ── Utilities ────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
-function msToDisplay(ms, dec=1) {
+function msToDisplay(ms, dec=2) {
   if (!ms || ms<=0) return '—';
   const s = ms/1000, m = Math.floor(s/60), sec = (s%60).toFixed(dec);
   return `${m}:${parseFloat(sec)<10?'0':''}${sec}`;
@@ -609,6 +623,20 @@ function checkSetupReady() {
 
 // ── ENTER TIMER ───────────────────────────────────────────────────────────────
 window.enterTimerScreen = async function() {
+  // Reset ALL local race state so a previous race never bleeds in
+  raceStartedAt  = null;
+  recordedSplits = {};
+  lastTapStack   = [];
+  pendingLocal   = {};
+  if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+  $('clock').textContent = '00:00.00';
+  $('clock').className   = 'clock-display';
+  $('start-btn').textContent = 'START';
+  $('start-btn').className   = 'start-btn';
+  $('undo-btn').disabled = true;
+  const notice = $('ready-notice');
+  if (notice) notice.style.display = 'block';
+
   $('header-meet-title').textContent = `${selectedMeet} — ${selectedRace}`;
   $('coach-display').textContent     = coachName;
   $('race-display').textContent      = selectedRace;
@@ -624,11 +652,14 @@ window.enterTimerScreen = async function() {
     if (snap.exists()) {
       Object.entries(snap.val()).forEach(([u, data]) => {
         if (!recordedSplits[u]) recordedSplits[u] = {};
-        // Only merge in splits not already set by this coach
+        // Merge all splits from Firebase — this is the live sync for all coaches.
+        // We always trust Firebase as the source of truth. Local taps write to
+        // Firebase immediately, so they'll come back through this listener
+        // and renderRunnerList() will show them instantly.
         ['mile1','mile2','finish'].forEach(s => {
-          if (data[s] && !recordedSplits[u][s]) recordedSplits[u][s] = data[s];
+          if (data[s]) recordedSplits[u][s] = data[s];
         });
-        if (data.coach && !recordedSplits[u].coach) recordedSplits[u].coach = data.coach;
+        if (data.coach) recordedSplits[u].coach = data.coach;
       });
       renderRunnerList();
     }
@@ -637,10 +668,17 @@ window.enterTimerScreen = async function() {
   // Listen for race start (so all coaches sync)
   onValue(ref(db, `races/${selectedMeetKey}/${selectedRaceKey}/startedAt`), snap => {
     if (snap.exists() && snap.val() > 0 && !raceStartedAt) {
+      const wasAlreadyRunning = snap.val() < Date.now() - 3000; // started >3s ago
       raceStartedAt = snap.val();
       startClock();
       $('start-btn').textContent = 'RUNNING';
       $('start-btn').className   = 'start-btn running';
+      const notice = $('ready-notice');
+      if (notice) notice.style.display = 'none';
+      // Tell a late-joining coach the race is already in progress
+      if (wasAlreadyRunning) {
+        showToast('Race already running — clock synced', 'warning');
+      }
     }
   });
 
@@ -673,12 +711,15 @@ window.handleStartStop = function() {
 function updateStartBtn() {
   $('start-btn').textContent = 'RUNNING';
   $('start-btn').className   = 'start-btn running';
+  // Hide the "all coaches must select first" notice once race is live
+  const notice = $('ready-notice');
+  if (notice) notice.style.display = 'none';
 }
 
 function startClock() {
   if (clockInterval) return;
   $('clock').className = 'clock-display running';
-  clockInterval = setInterval(() => { $('clock').textContent = msToDisplay(elapsedMs(), 1); }, 100);
+  clockInterval = setInterval(() => { $('clock').textContent = msToDisplay(elapsedMs(), 2); }, 50);
 }
 
 // ── SPLIT SELECTOR ────────────────────────────────────────────────────────────
@@ -712,7 +753,11 @@ window.tapRunner = function(username) {
 
   $('undo-btn').disabled = false;
   writeSplit(username, currentSplit, elapsed);
-  renderRunnerList();
+  // Use requestAnimationFrame so the DOM update is guaranteed to paint
+  // before the next user interaction — fixes "time only shows after tab switch"
+  requestAnimationFrame(() => {
+    renderRunnerList();
+  });
   showToast(`${getRunnerName(username)} — ${msToDisplay(elapsed)}`, 'success');
 };
 
