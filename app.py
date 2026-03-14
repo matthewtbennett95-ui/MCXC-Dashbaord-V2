@@ -407,16 +407,20 @@ def _get_athlete_pr(uname, races_df, season=None):
 
 
 def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None,
-                             meet_date=None, prior_meet_name=None):
+                             meet_date=None, prior_meet_name=None, filled=False):
     """
     Builds the HTML body for a meet split sheet.
+
+    filled=False (default): blank clipboard sheet — time columns are empty.
+    filled=True:            results sheet — actual recorded times are shown,
+                            runners sorted by finish time within each race.
 
     prior_meet_name: optional name of a previous year's version of this meet.
       When set, get_prior_time() checks BOTH the current meet name AND the
       prior meet name so year-to-year renaming doesn't break historical PRs.
 
-    Each race block uses class="keep-together page-break-race" so the browser
-    never splits a single race table across two printed pages.
+    Each race block forces a page break before it (except the first) so a race
+    never starts mid-page after another race ends.
     """
     active_athletes = roster_df[roster_df["Role"].str.upper() == "ATHLETE"].copy()
     athlete_opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}"
@@ -469,8 +473,9 @@ def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None,
 
     prior_note = f' <span style="font-size:11px;opacity:0.7;">(linked to: {prior_meet_name})</span>' if prior_meet_name and prior_meet_name != p_meet else ""
 
+    sheet_type = "Results Sheet" if filled else "Split Sheet"
     html  = '<div class="sheet-header">'
-    html += f'<h1>{p_meet} — Split Sheet{prior_note}</h1>'
+    html += f'<h1>{p_meet} — {sheet_type}{prior_note}</h1>'
     if date_str:
         html += f'<p class="sub">{date_str}</p>'
     html += '</div>'
@@ -491,12 +496,25 @@ def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None,
                    if isinstance(race, dict) else
                    meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist())
 
-        # Sort runners by current-season PR fastest → slowest
-        def runner_sort_key(uname):
-            t, _ = _get_athlete_pr(uname, races_df, season=CURRENT_SEASON)
-            return time_to_seconds(t) if t else 9999
-
-        runners_sorted = sorted(runners, key=runner_sort_key)
+        if filled:
+            # Sort by actual finish time for this race (fastest first).
+            # Runners with no finish time go to the bottom.
+            def filled_sort_key(uname):
+                row_data = meet_rows[
+                    (meet_rows["Race_Name"] == r_name) &
+                    (meet_rows["Username"]   == uname)
+                ]
+                if row_data.empty: return 9999
+                fin = str(row_data["Total_Time"].iloc[0]).strip()
+                sec = time_to_seconds(fin)
+                return sec if sec > 0 else 9999
+            runners_sorted = sorted(runners, key=filled_sort_key)
+        else:
+            # Sort by current-season PR fastest → slowest (clipboard order)
+            def runner_sort_key(uname):
+                t, _ = _get_athlete_pr(uname, races_df, season=CURRENT_SEASON)
+                return time_to_seconds(t) if t else 9999
+            runners_sorted = sorted(runners, key=runner_sort_key)
 
         # Each race block forces a page break BEFORE it (except the first)
         # so a race never starts mid-page after another race ends.
@@ -513,10 +531,120 @@ def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None,
         for uname in runners_sorted:
             name  = athlete_opts.get(uname, uname)
             prior = get_prior_time(uname)
-            html += f"<tr><td>{name}</td><td>{prior}</td><td></td><td></td><td></td></tr>"
+            if filled:
+                # Pull actual recorded times for this race
+                row_data = meet_rows[
+                    (meet_rows["Race_Name"] == r_name) &
+                    (meet_rows["Username"]   == uname)
+                ]
+                m1  = str(row_data["Mile_1"].iloc[0]).strip()    if not row_data.empty else ""
+                m2  = str(row_data["Mile_2"].iloc[0]).strip()    if not row_data.empty else ""
+                fin = str(row_data["Total_Time"].iloc[0]).strip() if not row_data.empty else ""
+                # Highlight the finish time cell if it has a value
+                fin_style = "font-weight:700;color:#0C223F;" if fin else ""
+                html += (f"<tr>"
+                         f"<td>{name}</td>"
+                         f"<td>{prior}</td>"
+                         f"<td>{m1}</td>"
+                         f"<td>{m2}</td>"
+                         f"<td style='{fin_style}'>{fin}</td>"
+                         f"</tr>")
+            else:
+                html += f"<tr><td>{name}</td><td>{prior}</td><td></td><td></td><td></td></tr>"
         html += "</table></div>"
 
     return html
+
+def _build_filled_workout_sheet_html(w_date, workouts_df, roster_df, races_df):
+    """
+    Builds a filled-in workout results sheet for a specific date.
+
+    Finds all workout sessions logged on w_date, groups by gender,
+    and prints actual recorded splits in the rep columns alongside
+    each athlete's name and current PR.
+
+    If multiple workout types were logged on the same date (e.g. a
+    combined Tempo + Hills session), each appears as its own section.
+    Boys and Girls are on separate pages.
+    """
+    try:
+        date_str = pd.to_datetime(w_date).strftime("%B %d, %Y")
+    except:
+        date_str = str(w_date)
+
+    # All workout rows for this date
+    day_workouts = workouts_df[workouts_df["Date"] == str(w_date)].copy()
+    if day_workouts.empty:
+        return "<p>No workout data found for this date.</p>", False
+
+    # Unique workout type + distance combos for that day
+    combos = day_workouts[["Workout_Type","Rep_Distance"]].drop_duplicates().values.tolist()
+
+    html_parts = []
+    for gender_label, gender_val in [("Boys", "Male"), ("Girls", "Female")]:
+        athletes = roster_df[
+            (roster_df["Role"].str.upper() == "ATHLETE") &
+            (roster_df["Active_Clean"].isin(ACTIVE_FLAGS)) &
+            (roster_df["Gender"].str.title() == gender_val)
+        ].sort_values(["Last_Name","First_Name"])
+
+        if athletes.empty:
+            continue
+
+        part = f'<div class="sheet-header"><h1>{gender_label} Workout Results</h1>'
+        part += f'<p class="sub">{date_str}</p></div>'
+
+        for w_type, w_dist in combos:
+            combo_rows = day_workouts[
+                (day_workouts["Workout_Type"] == w_type) &
+                (day_workouts["Rep_Distance"] == w_dist)
+            ]
+
+            # Find max rep count across all athletes for this combo
+            max_reps = 1
+            for _, r in combo_rows.iterrows():
+                splits = [s.strip() for s in str(r.get("Splits","")).split(",") if s.strip()]
+                if len(splits) > max_reps: max_reps = len(splits)
+
+            rep_headers = "".join(f"<th>{i}</th>" for i in range(1, max_reps+1))
+            part += f'<div class="keep-together">'
+            part += f'<h2>{gender_label} — {w_type} ({w_dist})</h2>'
+            part += f'<table><tr><th>Athlete (PR)</th>{rep_headers}<th>Status</th></tr>'
+
+            for _, athlete in athletes.iterrows():
+                uname = athlete["Username"]
+                a_row = combo_rows[combo_rows["Username"] == uname]
+                pr_time, _ = _get_athlete_pr(uname, races_df, season=CURRENT_SEASON)
+                pr_display = pr_time if pr_time else "—"
+                name_cell  = (f"{athlete['Last_Name']}, {athlete['First_Name']}"
+                              f"<span style='font-size:10px;color:#64748b;'> ({pr_display})</span>")
+
+                if a_row.empty:
+                    # Athlete not in this workout session — skip row
+                    continue
+
+                status = str(a_row.iloc[0].get("Status","")).strip()
+                splits = [s.strip() for s in str(a_row.iloc[0].get("Splits","")).split(",") if s.strip()]
+
+                # Color-code status
+                status_style = ""
+                if status == "Present":   status_style = "color:#22c55e;font-weight:600;"
+                elif status in ("Sick","Injured"): status_style = "color:#ef4444;"
+                elif status == "Unexcused": status_style = "color:#f59e0b;"
+
+                part += f'<tr><td style="text-align:left;padding-left:8px;">{name_cell}</td>'
+                for i in range(max_reps):
+                    val = splits[i] if i < len(splits) else ""
+                    part += f'<td>{val}</td>'
+                part += f'<td style="{status_style}">{status}</td></tr>'
+
+            part += "</table></div>"
+
+        html_parts.append(part)
+
+    body          = '<div class="page-break"></div>'.join(html_parts) if html_parts else "<p>No data found.</p>"
+    force_landscape = max_reps > 7 if html_parts else False
+    return body, force_landscape
 
 
 def _build_workout_sheet_html(w_type, w_dist, w_date, rep_count, roster_df, races_df, rest_df):
@@ -1430,41 +1558,74 @@ def _tab_roster_management():
             st.dataframe(active_roster[["First_Name", "Last_Name", "Role"]].sort_values("Last_Name"), hide_index=True)
 
     elif roster_action == "Add New Member":
-        with st.form("add_member_form"):
+        # Show success banner from previous submit (survives st.rerun)
+        if st.session_state.get("roster_added"):
+            name, un = st.session_state["roster_added"]
+            st.success(f"Added {name}. Username: '{un}'. Default password: 'changeme'.")
+            st.session_state["roster_added"] = None
+
+        # Role selector lives OUTSIDE the form so changing it rerenders the page
+        # and can show/hide the athlete-only fields dynamically.
+        r3, _ = st.columns([1, 2])
+        with r3:
+            new_role = st.selectbox("Role", ["Athlete", "Coach"], key="new_member_role")
+
+        with st.form("add_member_form", clear_on_submit=True):
             r1, r2 = st.columns(2)
             new_first = r1.text_input("First Name", autocomplete="off")
             new_last  = r2.text_input("Last Name", autocomplete="off")
-            r3, r4 = st.columns(2)
-            new_role      = r3.selectbox("Role", ["Athlete", "Coach"])
-            new_grad_year = r4.text_input("Grad Year (e.g., 2028)", autocomplete="off")
-            r5, _ = st.columns(2)
-            new_gender = r5.selectbox("Gender", ["Male", "Female", "N/A"])
+
+            # Only show Grad Year and Gender for athletes — coaches don't need them
+            if new_role == "Athlete":
+                r4, r5 = st.columns(2)
+                new_grad_year = r4.text_input("Grad Year (e.g., 2028)", autocomplete="off")
+                new_gender    = r5.selectbox("Gender", ["Male", "Female", "N/A"])
+            else:
+                new_grad_year = "Coach"
+                new_gender    = "N/A"
+                st.caption("Grad Year and Gender are set to N/A automatically for coaches.")
+
             if st.form_submit_button("Add to Roster"):
                 if not new_first or not new_last:
                     st.error("First and Last name are required.")
                 else:
                     if new_role == "Coach":
-                        final_grad_year, final_gender = "Coach", "N/A"
+                        final_grad_year = "Coach"
+                        final_gender    = "N/A"
+                        # Coaches get "coach.lastname" username format
+                        base_un = f"coach.{new_last.lower()}".replace(" ", "")
                     else:
-                        final_grad_year, final_gender = new_grad_year.strip(), new_gender
+                        final_grad_year = new_grad_year.strip()
+                        final_gender    = new_gender
                         if not final_grad_year.isdigit() or len(final_grad_year) != 4:
                             st.error("Graduation Year must be a 4-digit number.")
                             st.stop()
-                    base_un = f"{new_first.lower()}.{new_last.lower()}".replace(" ", "")
+                        base_un = f"{new_first.lower()}.{new_last.lower()}".replace(" ", "")
+
+                    # Ensure username is unique
                     gen_un, suffix = base_un, 1
                     while gen_un in roster_data["Username"].tolist():
                         gen_un = f"{base_un}{suffix}"; suffix += 1
+
                     new_row = pd.DataFrame([{
-                        "Username": gen_un, "Password": "changeme",
-                        "First_Name": new_first, "Last_Name": new_last,
-                        "Role": new_role, "First_Login": "TRUE", "Active": "TRUE",
-                        "Grad_Year": final_grad_year, "Gender": final_gender
+                        "Username":    gen_un,
+                        "Password":    "changeme",
+                        "First_Name":  new_first,
+                        "Last_Name":   new_last,
+                        "Role":        new_role,
+                        "First_Login": "TRUE",
+                        "Active":      "TRUE",
+                        "Grad_Year":   final_grad_year,
+                        "Gender":      final_gender
                     }])
                     push = roster_data.drop(columns=["Active_Clean"]) if "Active_Clean" in roster_data.columns else roster_data
                     updated = pd.concat([push, new_row], ignore_index=True)
-                    with st.spinner("Adding new member..."): conn.update(worksheet="Roster", data=updated)
-                    st.success(f"Added {new_first} {new_last}. Username: '{gen_un}'.")
-                    invalidate_roster(); st.rerun()
+                    with st.spinner("Adding new member..."):
+                        conn.update(worksheet="Roster", data=updated)
+                    # Store in session state so success message survives rerun
+                    st.session_state["roster_added"] = (f"{new_first} {new_last}", gen_un)
+                    invalidate_roster()
+                    st.rerun()
 
     elif roster_action == "Edit Member":
         st.info("Note: Usernames cannot be changed.")
@@ -1716,104 +1877,181 @@ def _printable_new_meet():
 def _printable_reprint_meet():
     """
     Reprint the split sheet for any existing active meet.
-    Reads the stored Prior_Meet_Name column if present so the reprint
-    uses the same historical PR lookup as the original print.
+
+    Two modes:
+    - Blank: empty time columns — use as a clipboard sheet at the meet.
+    - Filled: actual recorded times shown, runners sorted by finish time.
+      Use this to review results or share a printed summary after the meet.
     """
     st.markdown("### Reprint Existing Meet Split Sheet")
     active_meets = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]["Meet_Name"].dropna().unique().tolist()
     if not active_meets:
         st.info("No active meets found. Create one under 'Meet Sheet — Create New'.")
         return
-    col1, _ = st.columns([1, 1])
+
+    col1, col2 = st.columns([1, 1])
     with col1:
         p_meet = st.selectbox("Select Meet", ["-- Select --"] + active_meets)
-    if p_meet != "-- Select --":
-        meet_rows = races_data[races_data["Meet_Name"] == p_meet]
-        meet_date = meet_rows["Date"].iloc[0] if not meet_rows.empty else None
+    with col2:
+        sheet_mode = st.radio(
+            "Sheet Type",
+            ["Blank (clipboard)", "Filled (with results)"],
+            horizontal=True,
+            key="reprint_mode"
+        )
 
-        # Recover stored Prior_Meet_Name if it was set when the meet was created
-        stored_prior = ""
-        if "Prior_Meet_Name" in meet_rows.columns:
-            vals = meet_rows["Prior_Meet_Name"].dropna().unique().tolist()
-            stored_prior = vals[0] if vals else ""
-        stored_prior = stored_prior if stored_prior and stored_prior != "nan" else ""
+    if p_meet == "-- Select --":
+        return
 
-        if stored_prior:
-            st.caption(f'Prior Best times will be pulled from this meet AND "{stored_prior}".')
+    meet_rows  = races_data[races_data["Meet_Name"] == p_meet]
+    meet_date  = meet_rows["Date"].iloc[0] if not meet_rows.empty else None
+    filled     = sheet_mode == "Filled (with results)"
 
-        if st.button("Generate Print Sheet", type="primary"):
-            html_body = _build_split_sheet_html(
-                p_meet, races_data, roster_data,
-                meet_date=meet_date, prior_meet_name=stored_prior or None
-            )
-            final_html = wrap_html_for_print(f"{p_meet} Split Sheet", html_body)
-            st.success("Sheet ready!")
-            st.download_button(
-                label="⬇️ Download Split Sheet (HTML)",
-                data=final_html,
-                file_name=f"{p_meet.replace(' ', '_')}_{pd.to_datetime(p_date).strftime('%Y-%m-%d')}_SplitSheet.html",
-                mime="text/html"
-            )
+    # Check if any times exist when filled mode is selected
+    if filled:
+        has_times = meet_rows["Total_Time"].str.strip().ne("").any()
+        if not has_times:
+            st.warning("No finish times have been entered for this meet yet. "
+                       "The filled sheet will show blank time columns. "
+                       "Enter times in Data Entry → Race Results first.")
+
+    # Recover stored Prior_Meet_Name
+    stored_prior = ""
+    if "Prior_Meet_Name" in meet_rows.columns:
+        vals = meet_rows["Prior_Meet_Name"].dropna().unique().tolist()
+        stored_prior = vals[0] if vals else ""
+    stored_prior = stored_prior if stored_prior and stored_prior != "nan" else ""
+    if stored_prior:
+        st.caption(f'Prior Best times will be pulled from this meet AND "{stored_prior}".')
+
+    btn_label = "Generate Results Sheet" if filled else "Generate Blank Sheet"
+    if st.button(btn_label, type="primary"):
+        try:
+            date_str = pd.to_datetime(meet_date).strftime('%Y-%m-%d')
+        except:
+            date_str = str(meet_date or "")
+        html_body = _build_split_sheet_html(
+            p_meet, races_data, roster_data,
+            meet_date=meet_date, prior_meet_name=stored_prior or None,
+            filled=filled
+        )
+        sheet_label = "Results" if filled else "SplitSheet"
+        final_html  = wrap_html_for_print(
+            f"{p_meet} {'Results' if filled else 'Split Sheet'}",
+            html_body
+        )
+        st.success("Sheet ready!")
+        st.download_button(
+            label=f"⬇️ Download {'Results' if filled else 'Blank Split'} Sheet (HTML)",
+            data=final_html,
+            file_name=f"{p_meet.replace(' ', '_')}_{date_str}_{sheet_label}.html",
+            mime="text/html"
+        )
 
 
 def _printable_workout_sheet():
     """
-    Generate a blank printable workout clipboard sheet.
-    Boys and Girls print as separate pages within the same downloaded file.
-    Auto-switches to landscape when rep count > 7.
-    Includes the relevant rest cycle table at the bottom of each page.
-    This does NOT save anything to the database — it is a print-only tool.
-    Data entry happens in Data Entry → Workouts after practice.
+    Workout sheet printer with two modes:
+
+    Blank  — blank rep columns, rest cycle table at bottom.
+             Use before practice as the clipboard recording sheet.
+    Filled — actual recorded splits shown per athlete per rep.
+             Use after practice to review or file results on paper.
+
+    The filled sheet is generated from the Workouts Google Sheet, so
+    times must be entered in Data Entry → Workouts first.
     """
-    st.markdown("### Print Blank Workout Sheet")
-    st.info("This generates a print-ready sheet to bring to practice. Enter actual splits afterward in **Data Entry → Workouts**.")
+    st.markdown("### Print Workout Sheet")
+
+    w_col0, w_col1_pad = st.columns([2, 3])
+    with w_col0:
+        sheet_mode = st.radio(
+            "Sheet Type",
+            ["Blank (before practice)", "Filled (with results)"],
+            horizontal=True, key="ws_mode"
+        )
+    st.markdown("---")
+    filled = sheet_mode == "Filled (with results)"
 
     w_col1, w_col2, w_col3 = st.columns(3)
-    with w_col1:
-        w_date  = st.date_input("Workout Date", key="ws_date")
-        w_type  = st.selectbox("Workout Type", ["Intervals", "Tempo", "Hills", "Other"], key="ws_type")
-    with w_col2:
-        dist_opts_map = {
-            "Intervals": ["400m", "800m", "1000m", "1200m", "1 Mile", "Custom"],
-            "Tempo":     ["400m", "Miles", "Split", "Custom"],
-            "Hills":     ["400m", "800m", "Short Sprints", "Custom"],
-            "Other":     ["Custom"],
-        }
-        dist_options = dist_opts_map.get(w_type, ["Custom"])
-        sel_dist = st.selectbox("Rep Distance", dist_options, key="ws_dist")
-        if sel_dist == "Custom":
-            w_dist = st.text_input("Specify distance/details", placeholder="e.g. 2+1 mile", autocomplete="off", key="ws_custom_dist")
-        else:
-            w_dist = sel_dist
-        rep_count = st.number_input("Number of Rep Columns", min_value=1, max_value=20, value=5, key="ws_reps")
-    with w_col3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if rep_count > 7:
-            st.info(f"📄 **{rep_count} reps** → sheet will print in **landscape** automatically.")
-        else:
-            st.info(f"📄 **{rep_count} reps** → sheet will print in **portrait**.")
 
-    if st.button("🖨️ Generate Workout Sheet", type="primary"):
-        if not w_dist:
-            st.error("Please specify the rep distance/details.")
-            return
-        html_body, force_landscape = _build_workout_sheet_html(
-            w_type, w_dist, w_date, rep_count,
-            roster_data, races_data, rest_data
-        )
-        final_html = wrap_html_for_print(
-            f"Workout Sheet — {w_type} {w_dist}",
-            html_body,
-            force_landscape=force_landscape
-        )
-        orient = "landscape" if force_landscape else "portrait"
-        st.success(f"Workout sheet ready! ({orient} — Boys and Girls on separate pages)")
-        st.download_button(
-            label="⬇️ Download Workout Sheet (HTML)",
-            data=final_html,
-            file_name=f"Workout_{w_type}_{w_dist.replace(' ','_')}_{w_date.strftime('%Y-%m-%d')}.html",
-            mime="text/html"
-        )
+    with w_col1:
+        w_date = st.date_input("Workout Date", key="ws_date")
+
+    if filled:
+        # Filled mode: just needs the date — pulls all workouts for that day
+        with w_col2:
+            day_str = pd.to_datetime(w_date).strftime("%Y-%m-%d")
+            day_workouts = workouts_data[workouts_data["Date"] == day_str]
+            if day_workouts.empty:
+                st.info("No workouts logged for this date yet.")
+            else:
+                combos = day_workouts[["Workout_Type","Rep_Distance"]].drop_duplicates()
+                st.markdown("**Found on this date:**")
+                for _, row in combos.iterrows():
+                    st.markdown(f"- {row['Workout_Type']} ({row['Rep_Distance']})")
+
+        if st.button("Generate Filled Workout Sheet", type="primary"):
+            day_str = pd.to_datetime(w_date).strftime("%Y-%m-%d")
+            html_body, force_landscape = _build_filled_workout_sheet_html(
+                day_str, workouts_data, roster_data, races_data
+            )
+            final_html = wrap_html_for_print(
+                f"Workout Results — {w_date.strftime('%Y-%m-%d')}",
+                html_body,
+                force_landscape=force_landscape
+            )
+            orient = "landscape" if force_landscape else "portrait"
+            st.success(f"Filled workout sheet ready! ({orient})")
+            st.download_button(
+                label="⬇️ Download Filled Workout Sheet (HTML)",
+                data=final_html,
+                file_name=f"Workout_Results_{w_date.strftime('%Y-%m-%d')}.html",
+                mime="text/html"
+            )
+    else:
+        # Blank mode: needs workout type, distance, rep count
+        with w_col1:
+            w_type = st.selectbox("Workout Type", ["Intervals", "Tempo", "Hills", "Other"], key="ws_type")
+        with w_col2:
+            dist_opts_map = {
+                "Intervals": ["400m", "800m", "1000m", "1200m", "1 Mile", "Custom"],
+                "Tempo":     ["400m", "Miles", "Split", "Custom"],
+                "Hills":     ["400m", "800m", "Short Sprints", "Custom"],
+                "Other":     ["Custom"],
+            }
+            dist_options = dist_opts_map.get(w_type, ["Custom"])
+            sel_dist = st.selectbox("Rep Distance", dist_options, key="ws_dist")
+            if sel_dist == "Custom":
+                w_dist = st.text_input("Specify distance/details", placeholder="e.g. 2+1 mile", autocomplete="off", key="ws_custom_dist")
+            else:
+                w_dist = sel_dist
+            rep_count = st.number_input("Number of Rep Columns", min_value=1, max_value=20, value=5, key="ws_reps")
+        with w_col3:
+            st.markdown("<br>", unsafe_allow_html=True)
+            orient_note = "landscape" if rep_count > 7 else "portrait"
+            st.info(f"{rep_count} rep columns → **{orient_note}**")
+
+        if st.button("Generate Blank Workout Sheet", type="primary"):
+            if not w_dist:
+                st.error("Please specify the rep distance/details.")
+                return
+            html_body, force_landscape = _build_workout_sheet_html(
+                w_type, w_dist, w_date, rep_count,
+                roster_data, races_data, rest_data
+            )
+            final_html = wrap_html_for_print(
+                f"Workout Sheet — {w_type} {w_dist}",
+                html_body,
+                force_landscape=force_landscape
+            )
+            st.success(f"Blank workout sheet ready! ({orient_note} — Boys and Girls on separate pages)")
+            st.download_button(
+                label="⬇️ Download Blank Workout Sheet (HTML)",
+                data=final_html,
+                file_name=f"Workout_{w_type}_{w_dist.replace(' ','_')}_{w_date.strftime('%Y-%m-%d')}.html",
+                mime="text/html"
+            )
 
 
 def _printable_attendance():
