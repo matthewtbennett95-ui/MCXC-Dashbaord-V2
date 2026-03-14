@@ -363,33 +363,55 @@ def _get_athlete_pr(uname, races_df, season=None):
     return None, None
 
 
-def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None, meet_date=None):
+def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None,
+                             meet_date=None, prior_meet_name=None):
     """
     Builds the HTML body for a meet split sheet.
 
-    Changes from original:
-    - Date shown in the header.
-    - Athletes within each race sorted by their current-season PR (fastest
-      first) so they appear in likely finish order — easier to catch at splits.
-    - Prior-best logic unchanged: shows best at this specific meet, or overall
-      5K PR labelled as (PR) if no meet-specific history exists.
+    prior_meet_name: optional name of a previous year's version of this meet.
+      When set, get_prior_time() checks BOTH the current meet name AND the
+      prior meet name so year-to-year renaming doesn't break historical PRs.
+
+    Each race block uses class="keep-together page-break-race" so the browser
+    never splits a single race table across two printed pages.
     """
     active_athletes = roster_df[roster_df["Role"].str.upper() == "ATHLETE"].copy()
     athlete_opts = {row["Username"]: f"{row['First_Name']} {row['Last_Name']}"
                     for _, row in active_athletes.iterrows()}
 
-    def get_prior_time(uname, meet_name):
-        prior = races_df[(races_df["Username"] == uname) &
-                         (races_df["Meet_Name"] == meet_name) &
-                         (races_df["Total_Time"].str.strip() != "")].copy()
-        if not prior.empty:
-            prior["sec"] = prior["Total_Time"].apply(time_to_seconds)
-            prior = prior[prior["sec"] > 0]
-            if not prior.empty:
-                return seconds_to_time(prior["sec"].min())
-        all_5k = races_df[(races_df["Username"] == uname) &
-                          (races_df["Distance"].str.upper() == "5K") &
-                          (races_df["Total_Time"].str.strip() != "")].copy()
+    def get_prior_time(uname):
+        """
+        Returns the best time for this athlete at this meet (or the linked
+        prior meet name). Falls back to all-time 5K PR labelled (PR).
+        """
+        meet_names = [p_meet]
+        if prior_meet_name and prior_meet_name != p_meet:
+            meet_names.append(prior_meet_name)
+
+        best_sec = None
+        for mname in meet_names:
+            subset = races_df[
+                (races_df["Username"] == uname) &
+                (races_df["Meet_Name"] == mname) &
+                (races_df["Total_Time"].str.strip() != "")
+            ].copy()
+            if not subset.empty:
+                subset["sec"] = subset["Total_Time"].apply(time_to_seconds)
+                subset = subset[subset["sec"] > 0]
+                if not subset.empty:
+                    m = subset["sec"].min()
+                    if best_sec is None or m < best_sec:
+                        best_sec = m
+
+        if best_sec is not None:
+            return seconds_to_time(best_sec)
+
+        # Fall back to all-time 5K PR
+        all_5k = races_df[
+            (races_df["Username"] == uname) &
+            (races_df["Distance"].str.upper() == "5K") &
+            (races_df["Total_Time"].str.strip() != "")
+        ].copy()
         if not all_5k.empty:
             all_5k["sec"] = all_5k["Total_Time"].apply(time_to_seconds)
             all_5k = all_5k[all_5k["sec"] > 0]
@@ -402,8 +424,10 @@ def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None, meet_da
         try: date_str = pd.to_datetime(meet_date).strftime("%B %d, %Y")
         except: date_str = str(meet_date)
 
-    html  = f'<div class="sheet-header">'
-    html += f'<h1>{p_meet} — Split Sheet</h1>'
+    prior_note = f' <span style="font-size:11px;opacity:0.7;">(linked to: {prior_meet_name})</span>' if prior_meet_name and prior_meet_name != p_meet else ""
+
+    html  = '<div class="sheet-header">'
+    html += f'<h1>{p_meet} — Split Sheet{prior_note}</h1>'
     if date_str:
         html += f'<p class="sub">{date_str}</p>'
     html += '</div>'
@@ -416,13 +440,13 @@ def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None, meet_da
         for rn in meet_rows["Race_Name"].unique()
     ]
 
-    for race in races_to_show:
-        r_name   = race["name"] if isinstance(race, dict) else race
-        r_dist   = race.get("dist", "") if isinstance(race, dict) else ""
-        runners  = race.get("runners",
-                    meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist()
-                   ) if isinstance(race, dict) else \
-                   meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist()
+    for i, race in enumerate(races_to_show):
+        r_name  = race["name"] if isinstance(race, dict) else race
+        r_dist  = race.get("dist", "") if isinstance(race, dict) else ""
+        runners = (race.get("runners",
+                    meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist())
+                   if isinstance(race, dict) else
+                   meet_rows[meet_rows["Race_Name"] == r_name]["Username"].tolist())
 
         # Sort runners by current-season PR fastest → slowest
         def runner_sort_key(uname):
@@ -431,16 +455,21 @@ def _build_split_sheet_html(p_meet, races_df, roster_df, race_list=None, meet_da
 
         runners_sorted = sorted(runners, key=runner_sort_key)
 
-        html += f"<div class='keep-together'>"
-        html += f"<h2>{r_name} ({r_dist})</h2>"
+        # Each race block forces a page break BEFORE it (except the first)
+        # so a race never starts mid-page after another race ends.
+        # page-break-inside:avoid keeps the whole table on one page.
+        break_style = " page-break-before: always; break-before: always;" if i > 0 else ""
+        html += (f'<div style="page-break-inside:avoid;break-inside:avoid;'
+'                    margin-bottom:20px;{break_style}">')
+        html += f'<h2>{r_name} ({r_dist})</h2>'
         html += ("<table><tr>"
                  "<th>Athlete</th>"
                  "<th>Prior Best at Meet</th>"
                  "<th>1 Mile</th><th>2 Mile</th><th>Finish</th>"
                  "</tr>")
         for uname in runners_sorted:
-            name = athlete_opts.get(uname, uname)
-            prior = get_prior_time(uname, p_meet)
+            name  = athlete_opts.get(uname, uname)
+            prior = get_prior_time(uname)
             html += f"<tr><td>{name}</td><td>{prior}</td><td></td><td></td><td></td></tr>"
         html += "</table></div>"
 
@@ -1541,16 +1570,42 @@ def _tab_printables():
 
 def _printable_new_meet():
     """
-    Coach fills in meet name, date, and assigns runners to each race.
-    On submit: saves the pending roster to the Races sheet (blank times)
-    and generates a downloadable HTML split sheet.
+    Coach fills in meet name, date, optional prior-year meet link, and assigns
+    runners to each race.
+
+    Prior Meet Name logic:
+    - A dropdown shows all distinct meet names from previous seasons.
+    - If selected, the split sheet pulls Prior Best times from BOTH the current
+      meet name AND the linked prior name, so year-to-year name changes like
+      "Great American XC 2025" -> "Great American XC 2026" don't break history.
+    - The prior name is stored as Prior_Meet_Name on every row for this meet
+      so the reprint function can use it too without re-asking.
     """
     st.markdown("### Create New Meet & Print Split Sheet")
     st.markdown("Assign runners to each race below. This saves the meet to the database so you can enter times in **Data Entry** after the meet.")
 
     c_m1, c_m2 = st.columns(2)
-    with c_m1: p_meet = st.text_input("Meet Name", placeholder="e.g. Asics Invitational", autocomplete="off")
+    with c_m1: p_meet = st.text_input("Meet Name", placeholder="e.g. Great American XC 2026", autocomplete="off")
     with c_m2: p_date = st.date_input("Meet Date")
+
+    # Prior meet name — all unique meet names from past seasons
+    past_meets = sorted(
+        races_data[races_data["Season"] != CURRENT_SEASON]["Meet_Name"]
+        .dropna().unique().tolist()
+    )
+    st.markdown("**Link to Previous Year's Meet** *(optional — pulls prior PRs even if the meet name changed)*")
+    col_pm, _ = st.columns([1, 2])
+    with col_pm:
+        prior_opts = ["None (brand new meet)"] + past_meets
+        prior_meet_sel = st.selectbox(
+            "Previous year's version of this meet:",
+            prior_opts,
+            key="new_meet_prior"
+        )
+    prior_meet_name = None if prior_meet_sel == "None (brand new meet)" else prior_meet_sel
+    if prior_meet_name:
+        st.caption(f"Prior Best times will be pulled from both \"{p_meet}\" and \"{prior_meet_name}\".")
+
     st.markdown("---")
     race_count = st.number_input("How many separate races?", min_value=1, max_value=10, value=2)
 
@@ -1591,7 +1646,8 @@ def _printable_new_meet():
             new_rows = [
                 {"Date": formatted_date, "Meet_Name": p_meet, "Race_Name": race["name"],
                  "Distance": race["dist"], "Username": uname, "Mile_1": "", "Mile_2": "",
-                 "Total_Time": "", "Weight": 1.0, "Active": "TRUE", "Season": season}
+                 "Total_Time": "", "Weight": 1.0, "Active": "TRUE", "Season": season,
+                 "Prior_Meet_Name": prior_meet_name or ""}
                 for race in races_to_print for uname in race["runners"]
                 if races_data[(races_data["Meet_Name"] == p_meet) &
                               (races_data["Race_Name"] == race["name"]) &
@@ -1601,9 +1657,11 @@ def _printable_new_meet():
                 updated = pd.concat([races_data, pd.DataFrame(new_rows)], ignore_index=True)
                 with st.spinner("Saving meet to database..."):
                     conn.update(worksheet="Races", data=updated)
-                invalidate_roster()
-            html_body = _build_split_sheet_html(p_meet, races_data, roster_data,
-                                                 races_to_print, meet_date=p_date)
+                invalidate_races()
+            html_body = _build_split_sheet_html(
+                p_meet, races_data, roster_data, races_to_print,
+                meet_date=p_date, prior_meet_name=prior_meet_name
+            )
             final_html = wrap_html_for_print(f"{p_meet} Split Sheet", html_body)
             st.success(f"'{p_meet}' saved! Download your sheet below, then enter times in **Data Entry** after the meet.")
             st.download_button(
@@ -1612,10 +1670,12 @@ def _printable_new_meet():
                 file_name=f"{p_meet.replace(' ', '_')}_SplitSheet.html",
                 mime="text/html"
             )
-
-
 def _printable_reprint_meet():
-    """Reprint the split sheet for any existing active meet."""
+    """
+    Reprint the split sheet for any existing active meet.
+    Reads the stored Prior_Meet_Name column if present so the reprint
+    uses the same historical PR lookup as the original print.
+    """
     st.markdown("### Reprint Existing Meet Split Sheet")
     active_meets = races_data[races_data["Active"].isin(ACTIVE_FLAGS)]["Meet_Name"].dropna().unique().tolist()
     if not active_meets:
@@ -1625,11 +1685,24 @@ def _printable_reprint_meet():
     with col1:
         p_meet = st.selectbox("Select Meet", ["-- Select --"] + active_meets)
     if p_meet != "-- Select --":
-        # Show the stored date if available
         meet_rows = races_data[races_data["Meet_Name"] == p_meet]
         meet_date = meet_rows["Date"].iloc[0] if not meet_rows.empty else None
-        if st.button("🖨️ Generate Print Sheet", type="primary"):
-            html_body = _build_split_sheet_html(p_meet, races_data, roster_data, meet_date=meet_date)
+
+        # Recover stored Prior_Meet_Name if it was set when the meet was created
+        stored_prior = ""
+        if "Prior_Meet_Name" in meet_rows.columns:
+            vals = meet_rows["Prior_Meet_Name"].dropna().unique().tolist()
+            stored_prior = vals[0] if vals else ""
+        stored_prior = stored_prior if stored_prior and stored_prior != "nan" else ""
+
+        if stored_prior:
+            st.caption(f'Prior Best times will be pulled from this meet AND "{stored_prior}".')
+
+        if st.button("Generate Print Sheet", type="primary"):
+            html_body = _build_split_sheet_html(
+                p_meet, races_data, roster_data,
+                meet_date=meet_date, prior_meet_name=stored_prior or None
+            )
             final_html = wrap_html_for_print(f"{p_meet} Split Sheet", html_body)
             st.success("Sheet ready!")
             st.download_button(
@@ -1701,14 +1774,24 @@ def _printable_workout_sheet():
 
 
 def _printable_attendance():
-    """Blank weekly attendance sign-in sheet."""
+    """
+    Blank weekly attendance sign-in sheet.
+
+    Uses the same sheet-header styling as workout sheets for visual consistency.
+    Formatted to fit on a single portrait page:
+    - Name column is 32% wide, remaining space shared equally across day columns.
+    - Alternating column shading makes it easy to track which day you are in.
+    - Row height is tall enough to sign but compact enough to fit a full roster.
+    - Summer: Mon/Tues/Thurs (3 days, 6 in/out columns)
+    - School Year: Mon–Fri (5 days, 10 in/out columns) — auto-landscape if needed.
+    """
     st.markdown("### Print Attendance Sheet")
     col_a1, col_a2, col_a3 = st.columns(3)
     p_gender = col_a1.selectbox("Team", ["Boys", "Girls"], key="att_gender")
     p_type   = col_a2.selectbox("Season Type", ["Summer", "School Year"], key="att_type")
     p_week   = col_a3.text_input("Week Of (e.g., Aug 12–16)", key="att_week")
 
-    if st.button("🖨️ Generate Attendance Sheet", type="primary"):
+    if st.button("Generate Attendance Sheet", type="primary"):
         target_gender = "Male" if p_gender == "Boys" else "Female"
         athletes = roster_data[
             (roster_data["Role"].str.upper() == "ATHLETE") &
@@ -1717,30 +1800,50 @@ def _printable_attendance():
         ].sort_values("Last_Name")
 
         if p_type == "Summer":
-            cols_data = [("Mon In",True),("Mon Out",True),("Tues In",False),("Tues Out",False),
+            cols_data = [("Mon In",True),("Mon Out",True),
+                         ("Tues In",False),("Tues Out",False),
                          ("Thur In",True),("Thur Out",True)]
+            force_landscape = False
         else:
-            cols_data = [("Mon In",True),("Mon Out",True),("Tues In",False),("Tues Out",False),
-                         ("Wed In",True),("Wed Out",True),("Thurs In",False),("Thurs Out",False),
+            cols_data = [("Mon In",True),("Mon Out",True),
+                         ("Tues In",False),("Tues Out",False),
+                         ("Wed In",True),("Wed Out",True),
+                         ("Thurs In",False),("Thurs Out",False),
                          ("Fri In",True),("Fri Out",True)]
+            force_landscape = True   # 10 columns fits better in landscape
 
-        html  = f'<div class="sheet-header"><h1>{p_gender.upper()} — {p_type.upper()} ATTENDANCE</h1>'
-        if p_week: html += f'<p class="sub">Week of: {p_week}</p>'
+        # Build header using sheet-header class (matches workout sheet style)
+        html  = '<div class="sheet-header">'
+        html += f'<h1>{p_gender} Attendance</h1>'
+        if p_week:
+            html += f'<p class="sub">Week of: {p_week} &nbsp;|&nbsp; {p_type}</p>'
+        else:
+            html += f'<p class="sub">{p_type}</p>'
         html += '</div>'
-        html += "<table style='table-layout:fixed;'><tr><th style='width:28%;text-align:left;padding-left:10px;'>Runner</th>"
+
+        # Table — name col 32%, remaining width split evenly across day cols
+        html += '<table style="table-layout:fixed;">'
+        html += '<tr><th style="width:32%;text-align:left;padding-left:10px;">Runner</th>'
         for c_text, shaded in cols_data:
-            bg = "#e2e8f0" if shaded else "#ffffff"
-            html += f"<th style='background:{bg} !important;'>{c_text}</th>"
-        html += "</tr>"
+            bg = "#e2e8f0" if shaded else "#f8fafc"
+            html += f'<th style="background:{bg} !important;">{c_text}</th>'
+        html += '</tr>'
+
         for _, row in athletes.iterrows():
-            html += f"<tr><td style='text-align:left;padding-left:10px;'>{row['Last_Name']}, {row['First_Name']}</td>"
+            html += f'<tr style="height:28px;">'
+            html += f'<td style="text-align:left;padding-left:10px;">{row["Last_Name"]}, {row["First_Name"]}</td>'
             for _, shaded in cols_data:
                 bg = "#f1f5f9" if shaded else "#ffffff"
-                html += f"<td style='background:{bg} !important;'></td>"
-            html += "</tr>"
-        html += "</table>"
+                html += f'<td style="background:{bg} !important;"></td>'
+            html += '</tr>'
+        html += '</table>'
 
-        final_html = wrap_html_for_print(f"{p_gender} Attendance", html, is_attendance=True)
+        final_html = wrap_html_for_print(
+            f"{p_gender} Attendance",
+            html,
+            is_attendance=not force_landscape,
+            force_landscape=force_landscape
+        )
         st.success("Sheet ready!")
         st.download_button(
             label="⬇️ Download Attendance Sheet (HTML)",
