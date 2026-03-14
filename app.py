@@ -2027,18 +2027,118 @@ def _tab_data_entry():
     if de_type == "Race Results":
         race_action = st.radio(
             "Action:",
-            ["Enter / Edit Times", "Edit Meet Details"],
+            ["Enter / Edit Times", "Import from Timer", "Edit Meet Details"],
             horizontal=True,
             key="race_action_radio"
         )
         st.markdown("---")
         if race_action == "Enter / Edit Times":
             _de_race_results()
+        elif race_action == "Import from Timer":
+            _de_import_from_timer()
         elif race_action == "Edit Meet Details":
             _de_edit_meet()
 
     elif de_type == "Workouts":
         _de_workouts()
+
+
+def _de_import_from_timer():
+    """
+    Accepts the JSON exported from timer.html and writes splits into the
+    Races sheet. Only fills in blank cells — never overwrites a time that
+    was already manually entered, unless the coach checks the override box.
+
+    The JSON format expected:
+    {
+      "meet": "Great American XC 2026",
+      "race": "Boys Varsity (5K)",
+      "splits": {
+        "john.smith": {"name": "John Smith", "mile1": "5:42", "mile2": "11:30", "finish": "18:22"},
+        ...
+      }
+    }
+    """
+    st.subheader("Import from Race Timer")
+    st.info(
+        "After recording a race in the timer tool, tap **Export Times** and copy the JSON. "
+        "Paste it below and click Import. Only blank fields will be filled — existing times "
+        "are preserved unless you check the override box."
+    )
+
+    json_input = st.text_area(
+        "Paste timer JSON here",
+        height=200,
+        placeholder='{"meet": "...", "race": "...", "splits": {...}}',
+        key="timer_json_input"
+    )
+    override = st.checkbox("Override existing times (use if correcting a mistake)", value=False)
+
+    if st.button("Import Times", type="primary"):
+        if not json_input.strip():
+            st.error("Please paste the JSON from the timer tool.")
+            return
+        try:
+            data = json.loads(json_input.strip())
+        except Exception:
+            st.error("Invalid JSON — make sure you copied the full export from the timer.")
+            return
+
+        meet_name = data.get("meet", "")
+        race_name = data.get("race", "")
+        splits    = data.get("splits", {})
+
+        if not meet_name or not splits:
+            st.error("JSON is missing meet name or splits data.")
+            return
+
+        # Find matching rows in races_data
+        # Race name from timer may include distance in parens — strip for matching
+        race_base = race_name.split("(")[0].strip() if race_name else ""
+        mask = races_data["Meet_Name"] == meet_name
+        if race_base:
+            mask = mask & races_data["Race_Name"].str.startswith(race_base)
+
+        matched_rows = races_data[mask]
+        if matched_rows.empty:
+            st.warning(
+                f"No rows found for meet '{meet_name}' / race '{race_name}'. "
+                "Make sure the meet was created in Streamlit first."
+            )
+            return
+
+        updates = 0
+        skipped = 0
+        for username, split_data in splits.items():
+            row_mask = mask & (races_data["Username"] == username)
+            if not races_data[row_mask].empty:
+                for col, field in [("Mile_1","mile1"),("Mile_2","mile2"),("Total_Time","finish")]:
+                    new_val = split_data.get(field, "").strip()
+                    if not new_val:
+                        continue
+                    existing = str(races_data.loc[row_mask, col].iloc[0]).strip()
+                    if existing and not override:
+                        skipped += 1
+                        continue
+                    races_data.loc[row_mask, col] = new_val
+                    updates += 1
+
+        if updates == 0 and skipped > 0:
+            st.warning(
+                f"All {skipped} times were skipped because they already exist. "
+                "Check 'Override existing times' if you want to replace them."
+            )
+            return
+
+        with st.spinner("Saving to database..."):
+            conn.update(worksheet="Races", data=races_data)
+        invalidate_races()
+
+        msg = f"Imported {updates} time(s) successfully."
+        if skipped: msg += f" {skipped} skipped (already had data)."
+        st.success(msg)
+        if override and skipped == 0:
+            st.rerun()
 
 
 def _de_race_results():
