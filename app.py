@@ -2229,80 +2229,71 @@ def _render_announcement_card(row, show_controls=False):
     """
     Renders a single announcement as a styled card.
 
-    Parameters
-    ----------
-    row : pd.Series
-        One row from announcements_data.
-    show_controls : bool
-        If True, renders Archive / Restore buttons (coach view only).
-        Athletes never see controls.
-
-    Card layout:
-        ┌──────────────────────────────────────┐
-        │  Title                    Date Posted │
-        │  Message body                         │
-        │  [Link label →] (if link present)     │
-        │  [Archive] (coach only)               │
-        └──────────────────────────────────────┘
+    Fixes vs original:
+    - Date_Posted now stores full datetime string (YYYY-MM-DD HH:MM), so both
+      date and time are shown on the card.
+    - link_label is HTML-escaped before injection to prevent raw HTML from
+      leaking into the card if the field contains special characters or was
+      accidentally left as the placeholder text.
+    - show_controls=False (athlete view) renders no buttons at all.
     """
+    import html as html_lib
     T = THEMES[st.session_state["theme"]]
-    is_active = str(row.get("Active","TRUE")).strip().upper() in ACTIVE_FLAGS
+    is_active = str(row.get("Active", "TRUE")).strip().upper() in ACTIVE_FLAGS
 
-    # Dim archived cards slightly in coach view
-    opacity = "1.0" if is_active else "0.55"
+    opacity      = "1.0" if is_active else "0.55"
     border_color = T["metric_border"] if is_active else "#888888"
 
+    # Parse stored datetime — show date + time if available
+    raw_posted = str(row.get("Date_Posted", ""))
     try:
-        posted_date = pd.to_datetime(row["Date_Posted"]).strftime("%b %d, %Y")
+        dt = pd.to_datetime(raw_posted)
+        posted_display = dt.strftime("%b %d, %Y at %I:%M %p").replace(" 0", " ")
     except:
-        posted_date = str(row.get("Date_Posted",""))
+        posted_display = raw_posted
 
-    title   = str(row.get("Title","")).strip()
-    message = str(row.get("Message","")).strip()
-    link    = str(row.get("Link","")).strip()
-    label   = str(row.get("Link_Label","")).strip() or "View Link"
-    posted_by = str(row.get("Posted_By","Coach")).strip()
+    # Sanitize every field that goes into the HTML to prevent injection
+    title     = html_lib.escape(str(row.get("Title",     "")).strip())
+    message   = html_lib.escape(str(row.get("Message",   "")).strip())
+    posted_by = html_lib.escape(str(row.get("Posted_By", "Coach")).strip())
+    link      = str(row.get("Link", "")).strip()            # URL — not escaped (needs to stay valid)
+    raw_label = str(row.get("Link_Label", "")).strip()
+    label     = html_lib.escape(raw_label) if raw_label else "View Link"
 
+    # Only render a link if the URL actually looks like one
     link_html = ""
     if link.startswith("http"):
-        link_html = f"""
-        <a href="{link}" target="_blank" rel="noopener noreferrer"
-           style="display:inline-block; margin-top:10px; font-size:13px;
-                  color:{T['line']}; font-weight:600; text-decoration:none;">
-            {label} &rarr;
-        </a>"""
+        link_html = (
+            f'<a href="{link}" target="_blank" rel="noopener noreferrer" '            f'style="display:inline-block;margin-top:10px;font-size:13px;'            f'color:{T["line"]};font-weight:600;text-decoration:none;">'            f'{label} &rarr;</a>'
+        )
 
-    archived_badge = "" if is_active else "<span style='font-size:11px; color:#888; margin-left:8px;'>(Archived)</span>"
+    archived_badge = (
+        "" if is_active
+        else "<span style='font-size:11px;color:#888;margin-left:8px;'>(Archived)</span>"
+    )
 
     st.markdown(f"""
-    <div style="
-        background-color: {T['metric_bg']};
-        border: 1px solid {border_color};
-        border-left: 4px solid {T['line']};
-        border-radius: 8px;
-        padding: 16px 20px 12px 20px;
-        margin-bottom: 14px;
-        opacity: {opacity};
-    ">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-            <span style="font-size:15px; font-weight:700; color:{T['header']};">
+    <div style="background-color:{T['metric_bg']};border:1px solid {border_color};
+                border-left:4px solid {T['line']};border-radius:8px;
+                padding:16px 20px 12px 20px;margin-bottom:14px;opacity:{opacity};">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <span style="font-size:15px;font-weight:700;color:{T['header']};">
                 {title}{archived_badge}
             </span>
-            <span style="font-size:11px; color:{T['text']}; opacity:0.6; white-space:nowrap; margin-left:12px;">
-                {posted_date} &bull; {posted_by}
+            <span style="font-size:11px;color:{T['text']};opacity:0.6;
+                         white-space:nowrap;margin-left:12px;">
+                {posted_display} &bull; {posted_by}
             </span>
         </div>
-        <p style="margin:8px 0 0 0; font-size:13px; color:{T['text']}; line-height:1.6;">
+        <p style="margin:8px 0 0 0;font-size:13px;color:{T['text']};line-height:1.6;">
             {message}
         </p>
         {link_html}
     </div>
     """, unsafe_allow_html=True)
 
-    # Coach-only controls rendered below the card (outside the HTML block
-    # so Streamlit buttons work normally)
     if show_controls:
-        ann_id = str(row.get("ID",""))
+        ann_id = str(row.get("ID", ""))
         if is_active:
             if st.button("Archive", key=f"ann_archive_{ann_id}"):
                 announcements_data.loc[announcements_data["ID"] == ann_id, "Active"] = "FALSE"
@@ -2334,12 +2325,18 @@ def _manage_announcements():
     """
     Coach interface for announcements inside the Manage tab.
 
-    Two sub-sections:
-      - Post New Announcement : title, message, optional link + label
-      - Manage Existing        : shows all announcements (active and archived)
-                                 with Archive / Restore / Delete controls
+    Fixes vs original:
+    - Date_Posted now stores full datetime (YYYY-MM-DD HH:MM) so time shows on card.
+    - Post confirmation uses session state flag so it survives the st.rerun()
+      and displays on the next render cycle instead of flashing and vanishing.
+    - Fields clear automatically because st.rerun() re-renders the empty form.
     """
     st.subheader("Announcements")
+
+    # Session state flag: show confirmation banner after a successful post
+    if "ann_posted" not in st.session_state:
+        st.session_state["ann_posted"] = ""
+
     ann_action = st.radio(
         "Action:",
         ["Post New Announcement", "Manage Existing"],
@@ -2349,8 +2346,13 @@ def _manage_announcements():
     st.markdown("---")
 
     if ann_action == "Post New Announcement":
+        # Show confirmation banner from the previous submit (survives rerun)
+        if st.session_state["ann_posted"]:
+            st.success(f"Announcement \"{st.session_state['ann_posted']}\" posted successfully.")
+            st.session_state["ann_posted"] = ""
+
         st.markdown("### New Announcement")
-        with st.form("new_announcement_form"):
+        with st.form("new_announcement_form", clear_on_submit=True):
             title   = st.text_input("Title", placeholder="e.g. Practice cancelled Thursday", autocomplete="off")
             message = st.text_area("Message", placeholder="Full details here...", height=120)
             st.markdown("**Optional Link**")
@@ -2364,7 +2366,6 @@ def _manage_announcements():
                 elif not message.strip():
                     st.error("A message body is required.")
                 else:
-                    # Generate a simple unique ID: timestamp-based
                     new_id = str(int(pd.Timestamp.now().timestamp()))
                     new_row = pd.DataFrame([{
                         "ID":          new_id,
@@ -2373,14 +2374,17 @@ def _manage_announcements():
                         "Link":        link.strip(),
                         "Link_Label":  link_label.strip(),
                         "Posted_By":   f"{st.session_state['first_name']} {st.session_state['last_name']}",
-                        "Date_Posted": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                        # Store full datetime so time is available on the card
+                        "Date_Posted": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
                         "Active":      "TRUE",
                     }])
                     updated = pd.concat([announcements_data, new_row], ignore_index=True)
                     with st.spinner("Posting..."):
                         conn.update(worksheet="Announcements", data=updated)
-                    st.success(f"Announcement '{title.strip()}' posted.")
-                    st.cache_data.clear(); st.rerun()
+                    # Store title in session state so confirmation survives the rerun
+                    st.session_state["ann_posted"] = title.strip()
+                    st.cache_data.clear()
+                    st.rerun()
 
     elif ann_action == "Manage Existing":
         st.markdown("### All Announcements")
@@ -2388,7 +2392,6 @@ def _manage_announcements():
             st.info("No announcements have been posted yet.")
             return
 
-        # Sort newest first
         df = announcements_data.copy()
         df["Date_Obj"] = pd.to_datetime(df["Date_Posted"], errors="coerce")
         df = df.sort_values("Date_Obj", ascending=False)
