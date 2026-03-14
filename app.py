@@ -159,12 +159,28 @@ st.markdown(f"""
 # 2. MATH, LOGIC, & UTILITIES
 # ==========================================
 def time_to_seconds(time_str):
-    """Converts M:SS or M:SS.xx time string to total seconds."""
+    """
+    Converts a time string to total seconds.
+    Handles M:SS, M:SS.xx, and H:MM:SS formats.
+
+    H:MM:SS is included specifically because the Google Sheets API returns
+    time-typed cells in H:MM:SS format regardless of how they appear in the
+    sheet visually. A cell showing "11:42" comes back from the API as "0:11:42".
+    This is Sheets API behavior, not user input — so we handle it here rather
+    than requiring the sheet to always use plain-text formatting.
+    """
     if pd.isna(time_str) or str(time_str).strip() == "": return 0
     parts = str(time_str).strip().split(":")
-    if len(parts) == 2:
-        try: return int(parts[0]) * 60 + float(parts[1])
-        except: return 0
+    try:
+        if len(parts) == 2:
+            # M:SS or M:SS.xx  e.g. "11:42" or "11:42.30"
+            return int(parts[0]) * 60 + float(parts[1])
+        elif len(parts) == 3:
+            # H:MM:SS — Google Sheets API format for time-typed cells
+            # "0:11:42" = 0h 11m 42s = 702s
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    except:
+        return 0
     return 0
 
 def seconds_to_time(seconds):
@@ -1839,22 +1855,25 @@ def _printable_new_meet():
     with c_m1: p_meet = st.text_input("Meet Name", placeholder="e.g. Great American XC 2026", autocomplete="off")
     with c_m2: p_date = st.date_input("Meet Date")
 
-    # Prior meet name — all unique meet names from past seasons
-    past_meets = sorted(
-        races_data[races_data["Season"] != CURRENT_SEASON]["Meet_Name"]
-        .dropna().unique().tolist()
-    )
-    st.markdown("**Link to Previous Year's Meet** *(optional — pulls prior PRs even if the meet name changed)*")
+    # Prior meet name — show ALL existing meet names so coaches can link to
+    # any previous version regardless of season. We don't filter by season
+    # because CURRENT_SEASON in spring (March 2026) evaluates to "2025",
+    # so filtering season != CURRENT_SEASON would hide all 2025 meets.
+    all_meet_names = sorted(races_data["Meet_Name"].dropna().unique().tolist())
+    prior_candidates = [m for m in all_meet_names if m != p_meet.strip()]
+    st.markdown("**Link to a Previous Version of This Meet** *(optional — pulls prior PRs even if the meet name changed)*")
     col_pm, _ = st.columns([1, 2])
     with col_pm:
-        prior_opts = ["None (brand new meet)"] + past_meets
+        prior_opts = ["None (brand new meet)"] + prior_candidates
         prior_meet_sel = st.selectbox(
-            "Previous year's version of this meet:",
+            "Previous version of this meet (any year):",
             prior_opts,
             key="new_meet_prior"
         )
     prior_meet_name = None if prior_meet_sel == "None (brand new meet)" else prior_meet_sel
     if prior_meet_name:
+        st.caption(f'Prior Best times will be pulled from both "{p_meet}" and "{prior_meet_name}".')
+
         st.caption(f"Prior Best times will be pulled from both \"{p_meet}\" and \"{prior_meet_name}\".")
 
     st.markdown("---")
