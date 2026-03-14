@@ -162,8 +162,16 @@ def _push_leaderboard_to_firebase(races_df, roster_df):
 
         url  = f"{db_url}/leaderboard.json"
         resp = requests.put(url, json=payload, timeout=8)
+        if resp.status_code != 200:
+            # Surface the actual Firebase error for debugging
+            try:
+                err = resp.json()
+            except Exception:
+                err = resp.text
+            st.session_state["leaderboard_push_error"] = str(err)
         return resp.status_code == 200
-    except Exception:
+    except Exception as e:
+        st.session_state["leaderboard_push_error"] = str(e)
         return False  # Never block the main save
 
 
@@ -3454,12 +3462,17 @@ def _manage_timer_sync():
         "editing times directly in the Google Sheet."
     )
     if st.button("Publish Leaderboard Now", key="manual_leaderboard_btn"):
+        st.session_state.pop("leaderboard_push_error", None)
         with st.spinner("Publishing..."):
             ok = _push_leaderboard_to_firebase(races_data, roster_data)
         if ok:
-            st.success("Leaderboard published to Firebase. Parents can view it now.")
+            st.success("Leaderboard published. Parents can view it now.")
         else:
-            st.error("Publish failed — check your Firebase secrets in Streamlit Cloud.")
+            err = st.session_state.get("leaderboard_push_error", "Unknown error")
+            st.error(f"Publish failed: {err}")
+            if "active.empty" in str(err) or "season" in str(err).lower():
+                st.caption(f"Debug: CURRENT_SEASON = {CURRENT_SEASON}, "
+                           f"seasons in data = {sorted(races_data['Season'].dropna().unique().tolist())}")
     st.markdown("---")
 
     # ── Show what's currently in Firebase ────────────────────────────────────
