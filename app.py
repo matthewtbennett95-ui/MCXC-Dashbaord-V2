@@ -159,6 +159,7 @@ st.markdown(f"""
 # 2. MATH, LOGIC, & UTILITIES
 # ==========================================
 def time_to_seconds(time_str):
+    """Converts M:SS or M:SS.xx time string to total seconds."""
     if pd.isna(time_str) or str(time_str).strip() == "": return 0
     parts = str(time_str).strip().split(":")
     if len(parts) == 2:
@@ -1294,6 +1295,9 @@ def display_athlete_races(username, season):
     display_df = u_races[["Date", "Meet_Name", "Distance", "Mile_1", "Mile_2", "Total_Time", "Time_Sec"]].copy()
     display_df["Avg_Pace"] = display_df.apply(calc_avg_pace, axis=1)
     display_df.rename(columns={"Meet_Name": "Meet", "Mile_1": "Mile 1", "Mile_2": "Mile 2", "Total_Time": "Finish Time", "Avg_Pace": "Avg Pace"}, inplace=True)
+    # Clean up None/nan display values in split columns
+    for col in ["Mile 1", "Mile 2", "Finish Time"]:
+        display_df[col] = display_df[col].replace({"None": "", "nan": "", "NaN": ""}).fillna("")
 
     for dist in display_df["Distance"].unique():
         st.subheader(f"{dist} Races")
