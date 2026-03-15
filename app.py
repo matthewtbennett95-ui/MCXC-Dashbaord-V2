@@ -218,48 +218,25 @@ def _send_push_notification(notification_type, payload):
 st.set_page_config(page_title="MCXC Team Dashboard", layout="wide", page_icon="mcxc_logo.png")
 
 st.markdown("""
-    <meta name="color-scheme" content="light only">
     <style>
     footer {visibility: hidden !important;}
     [data-testid="stHeader"] {display: none !important;}
     .viewerBadge_container__1QSob {display: none !important;}
     [class^="viewerBadge_"] {display: none !important;}
     .block-container {padding-top: 1rem !important;}
-
-    /* ── Prevent device dark mode from overriding app themes ──
-       Uses both the meta tag above and CSS color-scheme property.
-       Targets Streamlit's own elements explicitly since iOS Safari
-       applies dark mode to native form controls regardless of CSS. */
-    :root {
-        color-scheme: light only !important;
-        supported-color-schemes: light !important;
-    }
+    :root { color-scheme: light only !important; }
     html { color-scheme: light only !important; }
     *, *::before, *::after { color-scheme: light only; }
-
-    /* Force light appearance on all interactive elements */
     input, select, textarea, button,
     [data-baseweb="input"], [data-baseweb="select"],
-    [data-baseweb="textarea"], [data-baseweb="base-input"],
-    [data-testid="stTextInput"] input,
-    [data-testid="stSelectbox"] select,
-    [data-testid="stTextArea"] textarea {
+    [data-baseweb="textarea"], [data-baseweb="base-input"] {
         color-scheme: light only !important;
         -webkit-appearance: none;
         appearance: none;
     }
-
-    /* Explicitly set backgrounds that iOS dark mode tends to override */
-    [data-baseweb="input"] { background-color: white !important; }
+    [data-baseweb="input"],
     [data-baseweb="base-input"] { background-color: white !important; }
-
     @media (prefers-color-scheme: dark) {
-        /* Override dark mode preferences entirely */
-        html, body, #root, [data-testid="stApp"],
-        [data-testid="stAppViewContainer"] {
-            background-color: unset !important;
-            color: unset !important;
-        }
         input, select, textarea {
             background-color: white !important;
             color: black !important;
