@@ -434,22 +434,41 @@ st.markdown(f"""
         background-color: {T["app_bg"]} !important;
     }}
 
-    /* ── Tabs — underline style, no solid background block ── */
-    [data-testid="stTabs"] [role="tab"] {{
-        background-color: transparent !important;
-        color: {_tab_text} !important;
-        border-bottom: 2px solid transparent !important;
-        padding-bottom: 6px !important;
-    }}
-    [data-testid="stTabs"] [role="tab"][aria-selected="true"] {{
-        background-color: transparent !important;
-        color: {_tab_active_bg} !important;
-        border-bottom: 3px solid {_tab_active_bg} !important;
-        font-weight: 700 !important;
-    }}
+    /* ── Tabs — spacious underline style ── */
     [data-testid="stTabs"] [role="tablist"] {{
         border-bottom: 1px solid {_field_bdr} !important;
         gap: 4px !important;
+        padding: 0 4px !important;
+    }}
+    [data-testid="stTabs"] [role="tab"] {{
+        background-color: transparent !important;
+        color: {_tab_text} !important;
+        border-bottom: 3px solid transparent !important;
+        border-radius: 8px 8px 0 0 !important;
+        padding: 10px 20px 9px 20px !important;
+        margin-bottom: -1px !important;
+        font-size: 14px !important;
+        letter-spacing: 0.2px !important;
+        transition: background-color 0.15s ease, color 0.15s ease !important;
+        opacity: 0.75 !important;
+    }}
+    [data-testid="stTabs"] [role="tab"]:hover {{
+        background-color: {T["metric_bg"]} !important;
+        color: {_tab_text} !important;
+        opacity: 1 !important;
+    }}
+    [data-testid="stTabs"] [role="tab"][aria-selected="true"] {{
+        background-color: {T["metric_bg"]} !important;
+        color: {_tab_active_bg} !important;
+        border-bottom: 3px solid {_tab_active_bg} !important;
+        font-weight: 700 !important;
+        letter-spacing: 0px !important;
+        opacity: 1 !important;
+    }}
+    [data-testid="stTabs"] [role="tab"] p {{
+        color: inherit !important;
+        font-size: inherit !important;
+        font-weight: inherit !important;
     }}
 
     /* ── Form container ── */
