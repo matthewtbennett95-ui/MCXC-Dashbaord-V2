@@ -370,7 +370,7 @@ function renderGrid() {
   });
 
   // Build table
-  let html = '<table><thead><tr><th>Athlete</th>';
+  let html = '<table><thead><tr><th>Athlete</th><th>Weighted Avg</th>';
   meets.forEach(m => {
     const short = m.split(' (')[0];
     const date  = m.match(/\(([^)]+)\)/)?.[1] || '';
@@ -382,7 +382,9 @@ function renderGrid() {
     const a    = athletes[key];
     const name = a.name || key;
     const pr   = a.pr   || '—';
+    const wa = a.wa || '—';
     html += `<tr><td><span class="rank-num">${rank + 1}</span> ${name}</td>`;
+    html += `<td style="color:var(--navy);font-weight:600;">${wa}</td>`;
     meets.forEach((_, idx) => {
       const t      = a.times?.[String(idx)] || '';
       const s      = t ? parseTime(t) : 0;
