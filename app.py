@@ -307,124 +307,273 @@ if "theme" not in st.session_state:
 
 T = THEMES[st.session_state["theme"]]  # Shorthand for current theme
 
-# Derive explicit field colors for this theme so every input/select/textarea
-# always has a consistent, predictable appearance regardless of device dark mode.
-# Light themes use a white field on a light background.
-# Dark themes use a slightly lighter surface on the dark background.
-if T["is_dark"]:
-    field_bg      = T["sidebar_bg"]        # slightly lighter than app_bg
-    field_text    = "#FFFFFF"
-    field_border  = "rgba(255,255,255,0.25)"
-    field_placeholder = "rgba(255,255,255,0.45)"
-    dataframe_filter = "invert(0.92) hue-rotate(180deg)"
-    form_bg       = T["sidebar_bg"]
-else:
-    field_bg      = "#FFFFFF"
-    field_text    = T["text"]
-    field_border  = T["metric_border"]
-    field_placeholder = "rgba(0,0,0,0.35)"
-    dataframe_filter = "none"
-    form_bg       = T["app_bg"]
+# ── Derive semantic color tokens per theme ────────────────────────────────────
+# Every color used in CSS is defined here so the CSS block below has
+# no conditional logic — just explicit values for every element.
+_dark = T["is_dark"]
+
+# Field (input/select/textarea) colors
+_field_bg    = T["sidebar_bg"]   if _dark else "#FFFFFF"
+_field_text  = "#FFFFFF"         if _dark else T["text"]
+_field_bdr   = "rgba(255,255,255,0.2)" if _dark else T["metric_border"]
+_field_ph    = "rgba(255,255,255,0.4)" if _dark else "rgba(0,0,0,0.3)"
+
+# Radio / checkbox label color — must always be readable
+_radio_text  = "#FFFFFF"  if _dark else T["text"]
+
+# Tab bar
+_tab_active_bg   = T["line"]
+_tab_active_text = "#FFFFFF"
+_tab_inactive_bg = T["app_bg"]
+_tab_text        = T["text"]
+
+# Dataframe — never use filter:invert, set explicit colors instead
+_df_bg       = T["sidebar_bg"]  if _dark else "#FFFFFF"
+_df_text     = "#FFFFFF"        if _dark else T["text"]
+_df_hdr_bg   = T["app_bg"]      if _dark else T["metric_bg"]
+_df_hdr_text = "#FFFFFF"        if _dark else T["text"]
+_df_border   = "rgba(255,255,255,0.12)" if _dark else T["metric_border"]
+
+# Form / expander background
+_form_bg     = T["sidebar_bg"]  if _dark else T["app_bg"]
+_expander_bg = T["sidebar_bg"]  if _dark else "#FFFFFF"
 
 st.markdown(f"""
     <style>
-        /* ── App background & structure ── */
-        .stApp {{ background-color: {T['app_bg']} !important; }}
-        [data-testid="stSidebar"] {{ background-color: {T['sidebar_bg']} !important; }}
-        [data-testid="stHeader"] {{ background-color: transparent !important; }}
-        .color-bar {{ height: 8px; background: {T['bar']}; margin-bottom: 2rem; border-radius: 4px; }}
+    /* ══════════════════════════════════════════════════════════════
+       MCXC THEME CSS — complete explicit override, no browser defaults
+       All selectors use !important to beat Streamlit and device dark mode.
+       color-scheme: light only prevents iOS Safari from remapping colors.
+    ══════════════════════════════════════════════════════════════ */
 
-        /* ── Metrics ── */
-        div[data-testid="metric-container"] {{
-            background-color: {T['metric_bg']} !important;
-            border: 1px solid {T['metric_border']} !important;
-            padding: 10px; border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }}
+    /* ── Base app ── */
+    html, body {{
+        color-scheme: light only !important;
+        background-color: {T["app_bg"]} !important;
+        color: {T["text"]} !important;
+    }}
+    .stApp, [data-testid="stApp"],
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"] {{
+        background-color: {T["app_bg"]} !important;
+        color: {T["text"]} !important;
+    }}
+    [data-testid="stSidebar"]  {{ background-color: {T["sidebar_bg"]} !important; }}
+    [data-testid="stHeader"]   {{ background-color: transparent !important; }}
+    .block-container           {{ background-color: {T["app_bg"]} !important; }}
+    .color-bar {{ height:8px; background:{T["bar"]}; margin-bottom:2rem; border-radius:4px; }}
 
-        /* ── Text & headings ── */
-        h1, h2, h3, h4, h5, h6,
-        .stMarkdown h1, .stMarkdown h2, .stMarkdown h3,
-        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {{
-            color: {T['header']} !important;
-        }}
-        .stMarkdown p, .stMarkdown li, .stMarkdown span,
-        div[data-testid="stCaptionContainer"], label, .stMetricValue,
-        div[data-testid="stTabs"] button p {{
-            color: {T['text']} !important;
-        }}
+    /* ── Headings ── */
+    h1,h2,h3,h4,h5,h6,
+    .stMarkdown h1,.stMarkdown h2,.stMarkdown h3,
+    [data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2 {{
+        color: {T["header"]} !important;
+    }}
 
-        /* ── Buttons ── */
-        div.stButton > button, div.stFormSubmitButton > button {{
-            background-color: {T['sidebar_bg']} !important;
-            color: {T['text']} !important;
-            border: 1px solid {T['metric_border']} !important;
-            transition: all 0.3s ease;
-        }}
-        div.stButton > button:hover, div.stFormSubmitButton > button:hover {{
-            border-color: {T['line']} !important;
-            color: {T['line']} !important;
-            background-color: {T['app_bg']} !important;
-        }}
+    /* ── Body text — every text container Streamlit uses ── */
+    p, li, span, div,
+    .stMarkdown p, .stMarkdown li, .stMarkdown span,
+    [data-testid="stCaptionContainer"],
+    [data-testid="stCaptionContainer"] p,
+    .stMetricValue, .stMetricDelta,
+    [data-testid="stMetricValue"],
+    [data-testid="stTabs"] button p {{
+        color: {T["text"]} !important;
+    }}
 
-        /* ── Form containers ── */
-        [data-testid="stForm"] {{
-            background-color: {form_bg} !important;
-            border-color: {field_border} !important;
-        }}
+    /* ── Labels (every widget label) ── */
+    label, [data-testid="stWidgetLabel"],
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stWidgetLabel"] span {{
+        color: {T["text"]} !important;
+    }}
 
-        /* ── ALL input fields — explicit colors, no browser defaults ──
-           Targets every Streamlit/BaseWeb widget variant so they are
-           always consistent regardless of device dark mode setting.     */
+    /* ── Radio buttons ── */
+    [data-testid="stRadio"] label,
+    [data-testid="stRadio"] p,
+    [data-testid="stRadio"] span,
+    [role="radiogroup"] label,
+    [role="radiogroup"] p {{
+        color: {_radio_text} !important;
+    }}
+    [data-testid="stRadio"] [data-baseweb="radio"] {{
+        background-color: transparent !important;
+    }}
+
+    /* ── Checkboxes ── */
+    [data-testid="stCheckbox"] label,
+    [data-testid="stCheckbox"] p,
+    [data-testid="stCheckbox"] span {{
+        color: {_radio_text} !important;
+    }}
+
+    /* ── Metrics ── */
+    div[data-testid="metric-container"] {{
+        background-color: {T["metric_bg"]} !important;
+        border: 1px solid {T["metric_border"]} !important;
+        border-radius: 8px; padding: 10px;
+    }}
+
+    /* ── Buttons ── */
+    div.stButton > button,
+    div.stFormSubmitButton > button,
+    div.stDownloadButton > button {{
+        background-color: {T["sidebar_bg"]} !important;
+        color: {T["text"]} !important;
+        border: 1px solid {T["metric_border"]} !important;
+        transition: all 0.2s ease;
+    }}
+    div.stButton > button:hover,
+    div.stFormSubmitButton > button:hover,
+    div.stDownloadButton > button:hover {{
+        border-color: {T["line"]} !important;
+        color: {T["line"]} !important;
+        background-color: {T["app_bg"]} !important;
+    }}
+
+    /* ── Tabs ── */
+    [data-testid="stTabs"] [role="tab"] {{
+        background-color: {_tab_inactive_bg} !important;
+        color: {_tab_text} !important;
+    }}
+    [data-testid="stTabs"] [role="tab"][aria-selected="true"] {{
+        background-color: {_tab_active_bg} !important;
+        color: {_tab_active_text} !important;
+        border-bottom-color: {_tab_active_bg} !important;
+    }}
+
+    /* ── Form container ── */
+    [data-testid="stForm"] {{
+        background-color: {_form_bg} !important;
+        border-color: {_field_bdr} !important;
+    }}
+
+    /* ── Expanders ── */
+    [data-testid="stExpander"] {{
+        background-color: {_expander_bg} !important;
+        border-color: {_field_bdr} !important;
+    }}
+    [data-testid="stExpander"] summary p {{
+        color: {T["text"]} !important;
+    }}
+
+    /* ── ALL input fields ── */
+    input, textarea, select {{
+        background-color: {_field_bg} !important;
+        color: {_field_text} !important;
+        caret-color: {_field_text} !important;
+        border-color: {_field_bdr} !important;
+        color-scheme: light only !important;
+        -webkit-text-fill-color: {_field_text} !important;
+    }}
+    input::placeholder, textarea::placeholder {{
+        color: {_field_ph} !important;
+        -webkit-text-fill-color: {_field_ph} !important;
+    }}
+    [data-baseweb="input"],
+    [data-baseweb="base-input"],
+    [data-baseweb="input"] > div,
+    [data-baseweb="base-input"] > div,
+    [data-baseweb="textarea"],
+    [data-baseweb="textarea"] > div,
+    [data-baseweb="select"],
+    [data-baseweb="select"] > div,
+    [data-baseweb="select"] > div > div {{
+        background-color: {_field_bg} !important;
+        color: {_field_text} !important;
+        caret-color: {_field_text} !important;
+        border-color: {_field_bdr} !important;
+        -webkit-text-fill-color: {_field_text} !important;
+    }}
+    [data-baseweb="input"] input,
+    [data-baseweb="base-input"] input,
+    [data-baseweb="textarea"] textarea,
+    [data-baseweb="select"] input {{
+        background-color: {_field_bg} !important;
+        color: {_field_text} !important;
+        caret-color: {_field_text} !important;
+        -webkit-text-fill-color: {_field_text} !important;
+    }}
+
+    /* Number input +/- buttons */
+    [data-testid="stNumberInput"] button {{
+        background-color: {_field_bg} !important;
+        color: {_field_text} !important;
+        border-color: {_field_bdr} !important;
+    }}
+
+    /* Date picker */
+    [data-testid="stDateInput"] > div,
+    [data-testid="stDateInput"] input {{
+        background-color: {_field_bg} !important;
+        color: {_field_text} !important;
+        -webkit-text-fill-color: {_field_text} !important;
+    }}
+
+    /* Multiselect tags */
+    [data-baseweb="tag"] {{
+        background-color: {T["line"]} !important;
+        color: #ffffff !important;
+    }}
+
+    /* Select dropdown options */
+    [data-baseweb="menu"],
+    [data-baseweb="popover"] {{
+        background-color: {_field_bg} !important;
+        color: {_field_text} !important;
+    }}
+    [data-baseweb="menu"] li,
+    [data-baseweb="option"] {{
+        background-color: {_field_bg} !important;
+        color: {_field_text} !important;
+    }}
+    [data-baseweb="option"]:hover {{
+        background-color: {T["metric_bg"]} !important;
+    }}
+
+    /* ── Dataframes — explicit colors, NO filter:invert ──
+       The "fuzzy" appearance was caused by the invert filter.
+       We set colors directly instead.                         */
+    [data-testid="stDataFrame"] th,
+    [data-testid="stDataEditor"] th {{
+        background-color: {_df_hdr_bg} !important;
+        color: {_df_hdr_text} !important;
+    }}
+    [data-testid="stDataFrame"] td,
+    [data-testid="stDataEditor"] td {{
+        background-color: {_df_bg} !important;
+        color: {_df_text} !important;
+    }}
+    [data-testid="stDataFrame"] table,
+    [data-testid="stDataEditor"] table {{
+        border-color: {_df_border} !important;
+    }}
+
+    /* ── Info / warning / success / error boxes ── */
+    [data-testid="stAlert"] {{
+        background-color: {_form_bg} !important;
+        color: {T["text"]} !important;
+    }}
+
+    /* ── Plotly chart backgrounds ── */
+    .js-plotly-plot .plotly,
+    .js-plotly-plot .plotly .bg {{
+        background-color: {T["app_bg"]} !important;
+    }}
+
+    /* ── iOS / device dark mode override ── */
+    @media (prefers-color-scheme: dark) {{
+        html, body, .stApp {{ background-color: {T["app_bg"]} !important; color: {T["text"]} !important; }}
         input, textarea, select {{
-            background-color: {field_bg} !important;
-            color: {field_text} !important;
-            caret-color: {field_text} !important;
-            border-color: {field_border} !important;
-            color-scheme: light only !important;
+            background-color: {_field_bg} !important;
+            color: {_field_text} !important;
+            -webkit-text-fill-color: {_field_text} !important;
         }}
-        input::placeholder, textarea::placeholder {{
-            color: {field_placeholder} !important;
-        }}
-        [data-baseweb="input"],
-        [data-baseweb="base-input"],
-        [data-baseweb="input"] > div,
-        [data-baseweb="base-input"] > div,
-        [data-baseweb="textarea"] > div,
-        [data-baseweb="select"] > div,
-        [data-baseweb="select"] > div > div {{
-            background-color: {field_bg} !important;
-            color: {field_text} !important;
-            caret-color: {field_text} !important;
-            border-color: {field_border} !important;
-        }}
-        [data-baseweb="input"] input,
-        [data-baseweb="base-input"] input,
-        [data-baseweb="textarea"] textarea {{
-            background-color: {field_bg} !important;
-            color: {field_text} !important;
-            caret-color: {field_text} !important;
-        }}
-
-        /* ── Number input buttons ── */
-        [data-testid="stNumberInput"] button {{
-            background-color: {field_bg} !important;
-            color: {field_text} !important;
-            border-color: {field_border} !important;
-        }}
-
-        /* ── Date input ── */
-        [data-testid="stDateInput"] input {{
-            background-color: {field_bg} !important;
-            color: {field_text} !important;
-        }}
-
-        /* ── Dataframes ── */
-        [data-testid="stDataFrame"],
-        [data-testid="stDataEditor"] {{ filter: {dataframe_filter}; }}
+    }}
     </style>
     <div class="color-bar"></div>
 """, unsafe_allow_html=True)
+
 
 # ==========================================
 # 2. MATH, LOGIC, & UTILITIES
