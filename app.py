@@ -186,30 +186,30 @@ def _push_leaderboard_to_firebase(races_df, roster_df):
 
 
 
-def _send_push_notification(notification_type, payload):
-    """
-    Calls the Render.com notification server to send a Web Push to all
-    subscribed devices. Fails silently so it never blocks the main action.
-
-    notification_type: "announcement" or "results"
-    payload: dict with keys the server expects (title, message, meet, etc.)
-    """
-    try:
-        server_url  = st.secrets.get("notify_server_url", "")
-        notify_secret = st.secrets.get("notify_secret", "")
-        if not server_url:
-            return False  # Not configured yet
-        endpoint = f"{server_url.rstrip('/')}/send-{notification_type}"
-        resp = requests.post(
-            endpoint,
-            json=payload,
-            headers={"X-Notify-Secret": notify_secret},
-            timeout=10
-        )
-        return resp.status_code == 200
-    except Exception:
-        return False  # Never block main action
-
+# NOTIF_DISABLED: def _send_push_notification(notification_type, payload):
+# NOTIF_DISABLED:     """
+# NOTIF_DISABLED:     Calls the Render.com notification server to send a Web Push to all
+# NOTIF_DISABLED:     subscribed devices. Fails silently so it never blocks the main action.
+# NOTIF_DISABLED: 
+# NOTIF_DISABLED:     notification_type: "announcement" or "results"
+# NOTIF_DISABLED:     payload: dict with keys the server expects (title, message, meet, etc.)
+# NOTIF_DISABLED:     """
+# NOTIF_DISABLED:     try:
+# NOTIF_DISABLED:         server_url  = st.secrets.get("notify_server_url", "")
+# NOTIF_DISABLED:         notify_secret = st.secrets.get("notify_secret", "")
+# NOTIF_DISABLED:         if not server_url:
+# NOTIF_DISABLED:             return False  # Not configured yet
+# NOTIF_DISABLED:         endpoint = f"{server_url.rstrip('/')}/send-{notification_type}"
+# NOTIF_DISABLED:         resp = requests.post(
+# NOTIF_DISABLED:             endpoint,
+# NOTIF_DISABLED:             json=payload,
+# NOTIF_DISABLED:             headers={"X-Notify-Secret": notify_secret},
+# NOTIF_DISABLED:             timeout=10
+# NOTIF_DISABLED:         )
+# NOTIF_DISABLED:         return resp.status_code == 200
+# NOTIF_DISABLED:     except Exception:
+# NOTIF_DISABLED:         return False  # Never block main action
+# NOTIF_DISABLED: 
 
 
 # ==========================================
@@ -217,30 +217,30 @@ def _send_push_notification(notification_type, payload):
 # ==========================================
 st.set_page_config(page_title="MCXC Team Dashboard", layout="wide", page_icon="mcxc_logo.png")
 
-# Inject PWA manifest + service worker registration
-# The manifest tells iOS this is an installable PWA so it appears
-# in iPhone Settings and can receive push notifications.
-_pwa_head = """
-<link rel="manifest" href="https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/manifest.json">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="MCXC">
-<link rel="apple-touch-icon" href="https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/mcxc_logo.png">
-<script>
-(async () => {
-  if ('serviceWorker' in navigator) {
-    try {
-      const swUrl = 'https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/sw.js';
-      const reg   = await navigator.serviceWorker.register(swUrl, {scope: '/'});
-      console.log('SW registered:', reg.scope);
-    } catch(e) {
-      console.log('SW registration failed:', e);
-    }
-  }
-})();
-</script>
-"""
-st.markdown(_pwa_head, unsafe_allow_html=True)
+# NOTIF_DISABLED: # Inject PWA manifest + service worker registration
+# NOTIF_DISABLED: # The manifest tells iOS this is an installable PWA so it appears
+# NOTIF_DISABLED: # in iPhone Settings and can receive push notifications.
+# NOTIF_DISABLED: _pwa_head = """
+# NOTIF_DISABLED: <link rel="manifest" href="https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/manifest.json">
+# NOTIF_DISABLED: <meta name="apple-mobile-web-app-capable" content="yes">
+# NOTIF_DISABLED: <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+# NOTIF_DISABLED: <meta name="apple-mobile-web-app-title" content="MCXC">
+# NOTIF_DISABLED: <link rel="apple-touch-icon" href="https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/mcxc_logo.png">
+# NOTIF_DISABLED: <script>
+# NOTIF_DISABLED: (async () => {
+# NOTIF_DISABLED:   if ('serviceWorker' in navigator) {
+# NOTIF_DISABLED:     try {
+# NOTIF_DISABLED:       const swUrl = 'https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/sw.js';
+# NOTIF_DISABLED:       const reg   = await navigator.serviceWorker.register(swUrl, {scope: '/'});
+# NOTIF_DISABLED:       console.log('SW registered:', reg.scope);
+# NOTIF_DISABLED:     } catch(e) {
+# NOTIF_DISABLED:       console.log('SW registration failed:', e);
+# NOTIF_DISABLED:     }
+# NOTIF_DISABLED:   }
+# NOTIF_DISABLED: })();
+# NOTIF_DISABLED: </script>
+# NOTIF_DISABLED: """
+# NOTIF_DISABLED: st.markdown(_pwa_head, unsafe_allow_html=True)
 
 st.markdown("""
     <style>
@@ -2022,54 +2022,54 @@ def _render_settings_overlay():
                 st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("**Push Notifications**")
-
-        # ── Push notification opt-in ─────────────────────────────────────────
-        try:
-            notify_server_s = str(st.secrets.get("notify_server_url") or "").strip()
-            vapid_pub_s     = str(st.secrets.get("vapid_public_key") or "").strip()
-        except Exception:
-            notify_server_s = ""
-            vapid_pub_s     = ""
-
-        _, notif_col2, _ = st.columns([1, 2, 1])
-        with notif_col2:
-            if not notify_server_s:
-                st.caption("Notification server not configured.")
-            else:
-                st.caption("Receive alerts for announcements and meet results.")
-
-        if notify_server_s and vapid_pub_s:
-            # Streamlit sandboxes iframes and blocks JS — use a link to a
-            # dedicated subscription page on GitHub Pages instead.
-            # That page handles the Web Push subscription and stores it
-            # in Firebase, then redirects back to the dashboard.
-            subscribe_url = (
-                "https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/"
-                f"subscribe.html?srv={notify_server_s.rstrip('/')}"
-                f"&pub={vapid_pub_s}"
-            )
-            _, btn_col, _ = st.columns([1, 2, 1])
-            with btn_col:
-                # Use st.markdown to render a styled anchor that matches
-                # the Log Out button appearance (inherits theme button CSS)
-                T_s = THEMES[st.session_state["theme"]]
-                st.markdown(
-                    f'''<a href="{subscribe_url}" target="_blank" style="
-                        display:block;text-align:center;text-decoration:none;
-                        background-color:{T_s["sidebar_bg"]};
-                        color:{T_s["text"]};
-                        border:1px solid {T_s["metric_border"]};
-                        border-radius:8px;padding:10px 16px;
-                        font-size:14px;font-weight:600;
-                        font-family:system-ui,sans-serif;
-                    ">🔔 Enable Notifications</a>''',
-                    unsafe_allow_html=True
-                )
-                st.caption(
-                    "Opens a quick setup page. Once done, close it and return here. "
-                    "You only need to do this once per device."
-                )
+# NOTIF_DISABLED:             st.markdown("**Push Notifications**")
+# NOTIF_DISABLED: 
+# NOTIF_DISABLED:         # ── Push notification opt-in ─────────────────────────────────────────
+# NOTIF_DISABLED:         try:
+# NOTIF_DISABLED:             notify_server_s = str(st.secrets.get("notify_server_url") or "").strip()
+# NOTIF_DISABLED:             vapid_pub_s     = str(st.secrets.get("vapid_public_key") or "").strip()
+# NOTIF_DISABLED:         except Exception:
+# NOTIF_DISABLED:             notify_server_s = ""
+# NOTIF_DISABLED:             vapid_pub_s     = ""
+# NOTIF_DISABLED: 
+# NOTIF_DISABLED:         _, notif_col2, _ = st.columns([1, 2, 1])
+# NOTIF_DISABLED:         with notif_col2:
+# NOTIF_DISABLED:             if not notify_server_s:
+# NOTIF_DISABLED:                 st.caption("Notification server not configured.")
+# NOTIF_DISABLED:             else:
+# NOTIF_DISABLED:                 st.caption("Receive alerts for announcements and meet results.")
+# NOTIF_DISABLED: 
+# NOTIF_DISABLED:         if notify_server_s and vapid_pub_s:
+# NOTIF_DISABLED:             # Streamlit sandboxes iframes and blocks JS — use a link to a
+# NOTIF_DISABLED:             # dedicated subscription page on GitHub Pages instead.
+# NOTIF_DISABLED:             # That page handles the Web Push subscription and stores it
+# NOTIF_DISABLED:             # in Firebase, then redirects back to the dashboard.
+# NOTIF_DISABLED:             subscribe_url = (
+# NOTIF_DISABLED:                 "https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/"
+# NOTIF_DISABLED:                 f"subscribe.html?srv={notify_server_s.rstrip('/')}"
+# NOTIF_DISABLED:                 f"&pub={vapid_pub_s}"
+# NOTIF_DISABLED:             )
+# NOTIF_DISABLED:             _, btn_col, _ = st.columns([1, 2, 1])
+# NOTIF_DISABLED:             with btn_col:
+# NOTIF_DISABLED:                 # Use st.markdown to render a styled anchor that matches
+# NOTIF_DISABLED:                 # the Log Out button appearance (inherits theme button CSS)
+# NOTIF_DISABLED:                 T_s = THEMES[st.session_state["theme"]]
+# NOTIF_DISABLED:                 st.markdown(
+# NOTIF_DISABLED:                     f'''<a href="{subscribe_url}" target="_blank" style="
+# NOTIF_DISABLED:                         display:block;text-align:center;text-decoration:none;
+# NOTIF_DISABLED:                         background-color:{T_s["sidebar_bg"]};
+# NOTIF_DISABLED:                         color:{T_s["text"]};
+# NOTIF_DISABLED:                         border:1px solid {T_s["metric_border"]};
+# NOTIF_DISABLED:                         border-radius:8px;padding:10px 16px;
+# NOTIF_DISABLED:                         font-size:14px;font-weight:600;
+# NOTIF_DISABLED:                         font-family:system-ui,sans-serif;
+# NOTIF_DISABLED:                     ">🔔 Enable Notifications</a>''',
+# NOTIF_DISABLED:                     unsafe_allow_html=True
+# NOTIF_DISABLED:                 )
+# NOTIF_DISABLED:                 st.caption(
+# NOTIF_DISABLED:                     "Opens a quick setup page. Once done, close it and return here. "
+# NOTIF_DISABLED:                     "You only need to do this once per device."
+# NOTIF_DISABLED:                 )
         _, logout_col, _ = st.columns([1, 2, 1])
         with logout_col:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -3812,11 +3812,11 @@ def _manage_announcements():
                     st.session_state["ann_posted"] = title.strip()
                     invalidate_announcements()
                     # Send push notification to all subscribed devices
-                    _send_push_notification("announcement", {
-                        "title":   title.strip(),
-                        "message": message.strip()[:120] + ("..." if len(message.strip()) > 120 else ""),
-                    })
-                    st.rerun()
+# NOTIF_DISABLED:                     _send_push_notification("announcement", {
+# NOTIF_DISABLED:                         "title":   title.strip(),
+# NOTIF_DISABLED:                         "message": message.strip()[:120] + ("..." if len(message.strip()) > 120 else ""),
+# NOTIF_DISABLED:                     })
+# NOTIF_DISABLED:                     st.rerun()
 
     elif ann_action == "Manage Existing":
         st.markdown("### All Announcements")
@@ -3915,30 +3915,30 @@ def _manage_timer_sync():
                            f"seasons in data = {sorted(races_data['Season'].dropna().unique().tolist())}")
 
     st.markdown("---")
-    st.markdown("### Send Meet Results Notification")
-    st.markdown("Sends a push notification to all subscribed athletes and coaches that meet results are posted.")
-    notif_col1, notif_col2 = st.columns([2, 1])
-    with notif_col1:
-        notif_meet = st.selectbox(
-            "Meet",
-            ["-- Select --"] + sorted(races_data[races_data["Season"] == CURRENT_SEASON]["Meet_Name"].dropna().unique().tolist(), reverse=True),
-            key="notif_meet_select"
-        )
-    with notif_col2:
-        lb_url = st.secrets.get("leaderboard_url", "")
-    if notif_meet != "-- Select --":
-        if st.button("Send Results Notification", key="send_results_notif_btn", type="primary"):
-            ok = _send_push_notification("results", {
-                "meet":            notif_meet,
-                "leaderboard_url": lb_url,
-            })
-            if ok:
-                st.success(f"Notification sent for {notif_meet}.")
-            else:
-                st.warning("Notification server not reachable. Check notify_server_url in Streamlit secrets.")
-    st.markdown("---")
-
-    # ── Show what's currently in Firebase ────────────────────────────────────
+# NOTIF_DISABLED:     st.markdown("### Send Meet Results Notification")
+# NOTIF_DISABLED:     st.markdown("Sends a push notification to all subscribed athletes and coaches that meet results are posted.")
+# NOTIF_DISABLED:     notif_col1, notif_col2 = st.columns([2, 1])
+# NOTIF_DISABLED:     with notif_col1:
+# NOTIF_DISABLED:         notif_meet = st.selectbox(
+# NOTIF_DISABLED:             "Meet",
+# NOTIF_DISABLED:             ["-- Select --"] + sorted(races_data[races_data["Season"] == CURRENT_SEASON]["Meet_Name"].dropna().unique().tolist(), reverse=True),
+# NOTIF_DISABLED:             key="notif_meet_select"
+# NOTIF_DISABLED:         )
+# NOTIF_DISABLED:     with notif_col2:
+# NOTIF_DISABLED:         lb_url = st.secrets.get("leaderboard_url", "")
+# NOTIF_DISABLED:     if notif_meet != "-- Select --":
+# NOTIF_DISABLED:         if st.button("Send Results Notification", key="send_results_notif_btn", type="primary"):
+# NOTIF_DISABLED:             ok = _send_push_notification("results", {
+# NOTIF_DISABLED:                 "meet":            notif_meet,
+# NOTIF_DISABLED:                 "leaderboard_url": lb_url,
+# NOTIF_DISABLED:             })
+# NOTIF_DISABLED:             if ok:
+# NOTIF_DISABLED:                 st.success(f"Notification sent for {notif_meet}.")
+# NOTIF_DISABLED:             else:
+# NOTIF_DISABLED:                 st.warning("Notification server not reachable. Check notify_server_url in Streamlit secrets.")
+# NOTIF_DISABLED:     st.markdown("---")
+# NOTIF_DISABLED: 
+# NOTIF_DISABLED:     # ── Show what's currently in Firebase ────────────────────────────────────
     db_url  = st.secrets.get("firebase_db_url",  "https://mcxc-timer-default-rtdb.firebaseio.com")
     api_key = st.secrets.get("firebase_api_key", "AIzaSyAKFLshFCubsJtJ5TTb7FFWB2kUl-wph_c")
 
