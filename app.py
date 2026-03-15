@@ -1994,76 +1994,6 @@ def _render_settings_overlay():
                 st.session_state["theme"] = chosen
                 st.rerun()
 
-            # ── Push notification opt-in ──────────────────────────────────
-            notify_server_s = st.secrets.get("notify_server_url", "")
-            vapid_pub_s     = st.secrets.get("vapid_public_key", "")
-            if notify_server_s and vapid_pub_s:
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("**Push Notifications**")
-                # Use a full-width iframe outside the narrow column so it
-                # doesn't get clipped on mobile
-                st.components.v1.html(f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-body{{margin:0;padding:0;font-family:system-ui,sans-serif;font-size:14px;background:transparent;}}
-.row{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:4px 0;}}
-.btn{{background:#8B2331;color:#fff;border:none;border-radius:6px;padding:9px 18px;
-      font-size:14px;font-weight:600;cursor:pointer;}}
-.ok{{color:#22c55e;font-weight:600;}}
-.dis{{background:none;border:1px solid #94a3b8;color:#64748b;border-radius:4px;
-      padding:4px 10px;font-size:12px;cursor:pointer;margin-left:8px;}}
-.muted{{color:#94a3b8;font-size:13px;}}
-</style></head><body>
-<div class="row">
-  <span id="status" class="muted">Checking...</span>
-  <button id="enable-btn" class="btn" onclick="enableNotif()" style="display:none">Enable Notifications</button>
-  <span id="enabled-msg" class="ok" style="display:none">✓ Notifications on
-    <button class="dis" onclick="disableNotif()">Disable</button>
-  </span>
-  <span id="unsupported" class="muted" style="display:none">Not supported — add app to home screen first</span>
-</div>
-<script>
-const SRV = '{notify_server_s.rstrip("/")}';
-const PUB = '{vapid_pub_s}';
-function b64(s){{const p='='.repeat((4-s.length%4)%4);const r=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from({{length:r.length}},(_,i)=>r.charCodeAt(i));}}
-async function init(){{
-  const st=document.getElementById('status');
-  if(!('serviceWorker' in navigator)||!('PushManager' in window)){{
-    st.style.display='none'; document.getElementById('unsupported').style.display='inline'; return;
-  }}
-  st.style.display='none';
-  try{{
-    const reg=await navigator.serviceWorker.ready;
-    const sub=await reg.pushManager.getSubscription();
-    if(sub){{document.getElementById('enabled-msg').style.display='inline';}}
-    else{{document.getElementById('enable-btn').style.display='inline-block';}}
-  }}catch(e){{document.getElementById('enable-btn').style.display='inline-block';}}
-}}
-async function enableNotif(){{
-  const p=await Notification.requestPermission();
-  if(p!=='granted'){{alert('Blocked — enable notifications in your phone settings then try again.');return;}}
-  try{{
-    const reg=await navigator.serviceWorker.ready;
-    const sub=await reg.pushManager.subscribe({{userVisibleOnly:true,applicationServerKey:b64(PUB)}});
-    await fetch(SRV+'/subscribe',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(sub.toJSON())}});
-    document.getElementById('enable-btn').style.display='none';
-    document.getElementById('enabled-msg').style.display='inline';
-  }}catch(e){{alert('Error: '+e.message);}}
-}}
-async function disableNotif(){{
-  try{{
-    const reg=await navigator.serviceWorker.ready;
-    const sub=await reg.pushManager.getSubscription();
-    if(sub)await sub.unsubscribe();
-    document.getElementById('enabled-msg').style.display='none';
-    document.getElementById('enable-btn').style.display='inline-block';
-  }}catch(e){{alert('Error: '+e.message);}}
-}}
-init();
-</script>
-</body></html>""", height=55, scrolling=False)
-
             st.markdown("<br>", unsafe_allow_html=True)
             st.button(
                 "Log Out",
@@ -2071,6 +2001,76 @@ init();
                 width='stretch',
                 key="settings_logout_btn"
             )
+
+        # ── Push notification opt-in ─────────────────────────────────────────
+        try:
+            notify_server_s = str(st.secrets.get("notify_server_url") or "").strip()
+            vapid_pub_s     = str(st.secrets.get("vapid_public_key") or "").strip()
+        except Exception:
+            notify_server_s = ""
+            vapid_pub_s     = ""
+
+        _, notif_col, _ = st.columns([1, 2, 1])
+        with notif_col:
+            st.markdown("**Push Notifications**")
+            if not notify_server_s:
+                st.caption("Notification server not configured in Streamlit secrets.")
+            else:
+                st.caption("Receive alerts for announcements and meet results.")
+
+        if notify_server_s and vapid_pub_s:
+            st.components.v1.html(f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{{margin:0;padding:4px 0;font-family:system-ui,sans-serif;font-size:14px;background:transparent;}}
+.row{{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;}}
+.btn{{background:#8B2331;color:#fff;border:none;border-radius:6px;padding:10px 20px;
+      font-size:14px;font-weight:600;cursor:pointer;}}
+.ok{{color:#22c55e;font-weight:600;}}
+.dis{{background:none;border:1px solid #94a3b8;color:#64748b;border-radius:4px;
+      padding:4px 10px;font-size:12px;cursor:pointer;margin-left:8px;}}
+.muted{{color:#94a3b8;font-size:13px;}}
+</style></head><body>
+<div class="row">
+  <span id="status" class="muted">Checking notification status...</span>
+  <button id="enable-btn" class="btn" onclick="enableNotif()" style="display:none">Enable Notifications</button>
+  <span id="enabled-msg" class="ok" style="display:none">✓ Notifications enabled
+    <button class="dis" onclick="disableNotif()">Disable</button>
+  </span>
+  <span id="unsupported" class="muted" style="display:none">Add app to home screen to enable notifications</span>
+</div>
+<script>
+const SRV='{notify_server_s.rstrip("/")}',PUB='{vapid_pub_s}';
+function b64(s){{const p='='.repeat((4-s.length%4)%4),r=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from({{length:r.length}},(_,i)=>r.charCodeAt(i));}}
+async function init(){{
+  const el=id=>document.getElementById(id);
+  el('status').style.display='none';
+  if(!('serviceWorker' in navigator)||!('PushManager' in window)){{el('unsupported').style.display='inline';return;}}
+  try{{
+    const sub=await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+    el(sub?'enabled-msg':'enable-btn').style.display=sub?'inline':'inline-block';
+  }}catch(e){{el('enable-btn').style.display='inline-block';}}
+}}
+async function enableNotif(){{
+  if(await Notification.requestPermission()!=='granted'){{alert('Blocked — go to phone Settings → Notifications and allow for this browser, then try again.');return;}}
+  try{{
+    const sub=await (await navigator.serviceWorker.ready).pushManager.subscribe({{userVisibleOnly:true,applicationServerKey:b64(PUB)}});
+    await fetch(SRV+'/subscribe',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(sub.toJSON())}});
+    document.getElementById('enable-btn').style.display='none';
+    document.getElementById('enabled-msg').style.display='inline';
+  }}catch(e){{alert('Could not enable: '+e.message);}}
+}}
+async function disableNotif(){{
+  try{{
+    const sub=await (await navigator.serviceWorker.ready).pushManager.getSubscription();
+    if(sub)await sub.unsubscribe();
+    document.getElementById('enabled-msg').style.display='none';
+    document.getElementById('enable-btn').style.display='inline-block';
+  }}catch(e){{alert('Error: '+e.message);}}
+}}
+init();
+</script></body></html>""", height=60, scrolling=False)
         st.markdown("---")
 
 
