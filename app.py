@@ -221,16 +221,16 @@ st.set_page_config(page_title="MCXC Team Dashboard", layout="wide", page_icon="m
 # The manifest tells iOS this is an installable PWA so it appears
 # in iPhone Settings and can receive push notifications.
 _pwa_head = """
-<link rel="manifest" href="https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/manifest.json">
+<link rel="manifest" href="https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="MCXC">
-<link rel="apple-touch-icon" href="https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/mcxc_logo.png">
+<link rel="apple-touch-icon" href="https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/mcxc_logo.png">
 <script>
 (async () => {
   if ('serviceWorker' in navigator) {
     try {
-      const swUrl = 'https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/sw.js';
+      const swUrl = 'https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/sw.js';
       const reg   = await navigator.serviceWorker.register(swUrl, {scope: '/'});
       console.log('SW registered:', reg.scope);
     } catch(e) {
@@ -2045,7 +2045,7 @@ def _render_settings_overlay():
             # That page handles the Web Push subscription and stores it
             # in Firebase, then redirects back to the dashboard.
             subscribe_url = (
-                "https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/"
+                "https://matthewtbennett95-ui.github.io/MCXC-Dashboard-V2/"
                 f"subscribe.html?srv={notify_server_s.rstrip('/')}"
                 f"&pub={vapid_pub_s}"
             )
