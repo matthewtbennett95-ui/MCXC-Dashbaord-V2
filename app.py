@@ -217,14 +217,19 @@ def _send_push_notification(notification_type, payload):
 # ==========================================
 st.set_page_config(page_title="MCXC Team Dashboard", layout="wide", page_icon="mcxc_logo.png")
 
-# Register service worker from GitHub Pages so Web Push works
-# regardless of which URL the app is open on
-_sw_registration = """
+# Inject PWA manifest + service worker registration
+# The manifest tells iOS this is an installable PWA so it appears
+# in iPhone Settings and can receive push notifications.
+_pwa_head = """
+<link rel="manifest" href="https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MCXC">
+<link rel="apple-touch-icon" href="https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/mcxc_logo.png">
 <script>
 (async () => {
   if ('serviceWorker' in navigator) {
     try {
-      // Register sw.js from GitHub Pages root
       const swUrl = 'https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/sw.js';
       const reg   = await navigator.serviceWorker.register(swUrl, {scope: '/'});
       console.log('SW registered:', reg.scope);
@@ -235,7 +240,7 @@ _sw_registration = """
 })();
 </script>
 """
-st.markdown(_sw_registration, unsafe_allow_html=True)
+st.markdown(_pwa_head, unsafe_allow_html=True)
 
 st.markdown("""
     <style>
