@@ -186,24 +186,84 @@ def _push_leaderboard_to_firebase(races_df, roster_df):
 
 
 
+def _send_push_notification(notification_type, payload):
+    """
+    Calls the Render.com notification server to send a Web Push to all
+    subscribed devices. Fails silently so it never blocks the main action.
+
+    notification_type: "announcement" or "results"
+    payload: dict with keys the server expects (title, message, meet, etc.)
+    """
+    try:
+        server_url  = st.secrets.get("notify_server_url", "")
+        notify_secret = st.secrets.get("notify_secret", "")
+        if not server_url:
+            return False  # Not configured yet
+        endpoint = f"{server_url.rstrip('/')}/send-{notification_type}"
+        resp = requests.post(
+            endpoint,
+            json=payload,
+            headers={"X-Notify-Secret": notify_secret},
+            timeout=10
+        )
+        return resp.status_code == 200
+    except Exception:
+        return False  # Never block main action
+
+
+
 # ==========================================
 # 1. APP SETUP & VISUAL THEMES
 # ==========================================
 st.set_page_config(page_title="MCXC Team Dashboard", layout="wide", page_icon="mcxc_logo.png")
 
 st.markdown("""
+    <meta name="color-scheme" content="light only">
     <style>
     footer {visibility: hidden !important;}
     [data-testid="stHeader"] {display: none !important;}
     .viewerBadge_container__1QSob {display: none !important;}
     [class^="viewerBadge_"] {display: none !important;}
     .block-container {padding-top: 1rem !important;}
-    /* Prevent device dark mode from overriding app themes */
-    :root { color-scheme: light only !important; }
+
+    /* ── Prevent device dark mode from overriding app themes ──
+       Uses both the meta tag above and CSS color-scheme property.
+       Targets Streamlit's own elements explicitly since iOS Safari
+       applies dark mode to native form controls regardless of CSS. */
+    :root {
+        color-scheme: light only !important;
+        supported-color-schemes: light !important;
+    }
+    html { color-scheme: light only !important; }
     *, *::before, *::after { color-scheme: light only; }
-    input, select, textarea, button {
+
+    /* Force light appearance on all interactive elements */
+    input, select, textarea, button,
+    [data-baseweb="input"], [data-baseweb="select"],
+    [data-baseweb="textarea"], [data-baseweb="base-input"],
+    [data-testid="stTextInput"] input,
+    [data-testid="stSelectbox"] select,
+    [data-testid="stTextArea"] textarea {
         color-scheme: light only !important;
         -webkit-appearance: none;
+        appearance: none;
+    }
+
+    /* Explicitly set backgrounds that iOS dark mode tends to override */
+    [data-baseweb="input"] { background-color: white !important; }
+    [data-baseweb="base-input"] { background-color: white !important; }
+
+    @media (prefers-color-scheme: dark) {
+        /* Override dark mode preferences entirely */
+        html, body, #root, [data-testid="stApp"],
+        [data-testid="stAppViewContainer"] {
+            background-color: unset !important;
+            color: unset !important;
+        }
+        input, select, textarea {
+            background-color: white !important;
+            color: black !important;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -3394,6 +3454,11 @@ def _manage_announcements():
                     # Store title in session state so confirmation survives the rerun
                     st.session_state["ann_posted"] = title.strip()
                     invalidate_announcements()
+                    # Send push notification to all subscribed devices
+                    _send_push_notification("announcement", {
+                        "title":   title.strip(),
+                        "message": message.strip()[:120] + ("..." if len(message.strip()) > 120 else ""),
+                    })
                     st.rerun()
 
     elif ann_action == "Manage Existing":
@@ -3430,9 +3495,83 @@ def _athlete_announcements_tab():
     """
     Read-only announcement feed shown to athletes.
     Displays all active announcements newest first.
-    No controls — athletes cannot archive or delete.
+    Includes a notification opt-in prompt using the Web Push API.
     """
     st.subheader("Announcements")
+
+    # ── Push notification opt-in ──────────────────────────────────────────────
+    notify_server = st.secrets.get("notify_server_url", "")
+    if notify_server:
+        server_safe = notify_server.rstrip("/")
+        st.components.v1.html(f"""
+        <div id="notify-banner" style="
+            background:#f0f4ff;border:1px solid #c7d2fe;border-radius:8px;
+            padding:12px 16px;margin-bottom:16px;display:flex;
+            align-items:center;justify-content:space-between;gap:12px;
+            font-family:system-ui,sans-serif;font-size:14px;flex-wrap:wrap;
+        ">
+            <span style="color:#1e293b;">
+                🔔 <strong>Get notified</strong> when coaches post announcements or meet results.
+            </span>
+            <button id="notify-btn" onclick="requestNotify()" style="
+                background:#8B2331;color:#fff;border:none;border-radius:6px;
+                padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;
+                white-space:nowrap;
+            ">Enable Notifications</button>
+        </div>
+        <script>
+        const NOTIFY_SERVER = '{server_safe}';
+        const VAPID_PUBLIC  = '{st.secrets.get("vapid_public_key", "")}';
+
+        // Hide banner if already subscribed
+        (async () => {{
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {{
+                document.getElementById('notify-banner').style.display = 'none';
+                return;
+            }}
+            try {{
+                const reg  = await navigator.serviceWorker.ready;
+                const sub  = await reg.pushManager.getSubscription();
+                if (sub) document.getElementById('notify-banner').style.display = 'none';
+            }} catch(e) {{}}
+        }})();
+
+        async function requestNotify() {{
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {{
+                alert('Notifications are not supported in this browser. Try adding the app to your home screen first.');
+                return;
+            }}
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') {{
+                alert('Notifications blocked. You can enable them in your browser settings.');
+                return;
+            }}
+            try {{
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.subscribe({{
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC)
+                }});
+                await fetch(NOTIFY_SERVER + '/subscribe', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify(sub.toJSON())
+                }});
+                document.getElementById('notify-banner').style.display = 'none';
+                alert('Notifications enabled! You will be notified for new announcements and meet results.');
+            }} catch(e) {{
+                alert('Could not enable notifications: ' + e.message);
+            }}
+        }}
+
+        function urlBase64ToUint8Array(base64String) {{
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const raw     = window.atob(base64);
+            return Uint8Array.from({{length: raw.length}}, (_, i) => raw.charCodeAt(i));
+        }}
+        </script>
+        """, height=80, scrolling=False)
 
     active = announcements_data[
         announcements_data["Active"].astype(str).str.upper().isin(ACTIVE_FLAGS)
@@ -3491,6 +3630,29 @@ def _manage_timer_sync():
             if "active.empty" in str(err) or "season" in str(err).lower():
                 st.caption(f"Debug: CURRENT_SEASON = {CURRENT_SEASON}, "
                            f"seasons in data = {sorted(races_data['Season'].dropna().unique().tolist())}")
+
+    st.markdown("---")
+    st.markdown("### Send Meet Results Notification")
+    st.markdown("Sends a push notification to all subscribed athletes and coaches that meet results are posted.")
+    notif_col1, notif_col2 = st.columns([2, 1])
+    with notif_col1:
+        notif_meet = st.selectbox(
+            "Meet",
+            ["-- Select --"] + sorted(races_data[races_data["Season"] == CURRENT_SEASON]["Meet_Name"].dropna().unique().tolist(), reverse=True),
+            key="notif_meet_select"
+        )
+    with notif_col2:
+        lb_url = st.secrets.get("leaderboard_url", "")
+    if notif_meet != "-- Select --":
+        if st.button("Send Results Notification", key="send_results_notif_btn", type="primary"):
+            ok = _send_push_notification("results", {
+                "meet":            notif_meet,
+                "leaderboard_url": lb_url,
+            })
+            if ok:
+                st.success(f"Notification sent for {notif_meet}.")
+            else:
+                st.warning("Notification server not reachable. Check notify_server_url in Streamlit secrets.")
     st.markdown("---")
 
     # ── Show what's currently in Firebase ────────────────────────────────────
