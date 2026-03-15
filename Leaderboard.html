@@ -132,6 +132,7 @@ body {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;   /* enforces column widths strictly */
   min-width: 500px;
 }
 
@@ -145,17 +146,36 @@ thead th {
   letter-spacing: 1px;
   text-transform: uppercase;
   color: rgba(255,255,255,0.8);
-  padding: 10px 12px;
+  padding: 10px 8px;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;       /* allow wrapping */
+  word-break: break-word;
+  width: 80px;               /* consistent meet column width */
+  min-width: 80px;
+  max-width: 80px;
   border-right: 1px solid rgba(255,255,255,0.1);
+  vertical-align: bottom;    /* align header text to bottom for neatness */
 }
 thead th:first-child {
   text-align: left;
-  width: 160px;
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  white-space: nowrap;       /* name column never wraps */
   border-radius: 10px 0 0 0;
+  vertical-align: middle;
+}
+thead th:nth-child(2) {
+  /* Weighted Avg column — slightly wider than meet columns */
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
+  white-space: normal;
 }
 thead th:last-child {
+  /* PR column */
+  width: 70px;
+  min-width: 70px;
   border-radius: 0 10px 0 0;
   border-right: none;
 }
@@ -170,11 +190,14 @@ tbody tr:hover { background: #f0f4ff; }
 
 tbody td {
   font-size: 13px;
-  padding: 10px 12px;
+  padding: 8px 8px;
   text-align: center;
   color: var(--muted);
   border-right: 1px solid var(--border);
   white-space: nowrap;
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
 }
 tbody td:last-child { border-right: none; }
 tbody td:first-child {
@@ -184,6 +207,15 @@ tbody td:first-child {
   font-weight: 700;
   color: var(--text);
   padding-left: 14px;
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  white-space: nowrap;
+}
+tbody td:nth-child(2) {
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
 }
 
 /* Highlight the best time per column */
