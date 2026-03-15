@@ -217,6 +217,26 @@ def _send_push_notification(notification_type, payload):
 # ==========================================
 st.set_page_config(page_title="MCXC Team Dashboard", layout="wide", page_icon="mcxc_logo.png")
 
+# Register service worker from GitHub Pages so Web Push works
+# regardless of which URL the app is open on
+_sw_registration = """
+<script>
+(async () => {
+  if ('serviceWorker' in navigator) {
+    try {
+      // Register sw.js from GitHub Pages root
+      const swUrl = 'https://matthewtbennett95-ui.github.io/MCXC-Dashbaord-V2/sw.js';
+      const reg   = await navigator.serviceWorker.register(swUrl, {scope: '/'});
+      console.log('SW registered:', reg.scope);
+    } catch(e) {
+      console.log('SW registration failed:', e);
+    }
+  }
+})();
+</script>
+"""
+st.markdown(_sw_registration, unsafe_allow_html=True)
+
 st.markdown("""
     <style>
     footer {visibility: hidden !important;}
@@ -2070,7 +2090,7 @@ async function disableNotif(){{
   }}catch(e){{alert('Error: '+e.message);}}
 }}
 init();
-</script></body></html>""", height=60, scrolling=False)
+</script></body></html>""", height=80, scrolling=False)
         st.markdown("---")
 
 
