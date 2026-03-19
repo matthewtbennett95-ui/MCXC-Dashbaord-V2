@@ -3177,9 +3177,14 @@ def _de_race_results():
     for _, r in target_rows.iterrows():
         match = roster_data[roster_data["Username"] == r["Username"]]
         a_name = f"{match.iloc[0]['First_Name']} {match.iloc[0]['Last_Name']}" if not match.empty else r["Username"]
+        def _clean_time(val):
+            """Convert any value to a clean string time, stripping NaN/None/floats."""
+            s = str(val).strip()
+            return "" if s in ("", "nan", "None", "NaN") else s
         grid_data.append({"Username": r["Username"], "Athlete Name": a_name,
-                           "Mile 1": r.get("Mile_1",""), "Mile 2": r.get("Mile_2",""),
-                           "Total Time": r.get("Total_Time","")})
+                           "Mile 1":     _clean_time(r.get("Mile_1","")),
+                           "Mile 2":     _clean_time(r.get("Mile_2","")),
+                           "Total Time": _clean_time(r.get("Total_Time",""))})
 
     col_config = {
         "Username": None,
